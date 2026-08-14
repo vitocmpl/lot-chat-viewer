@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.8
+// @version      0.0.9
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.8 — parser chat)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.9 — parser chat)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -152,6 +152,16 @@
   // o " - " come separatore, a seconda del tipo di messaggio): si usa
   // invece il link '../avatar.asp?id=NOME', sempre presente nel blocco
   // sia nel caso venga messo dentro il timestamp sia come nodo fratello.
+  // I tag di posizione (es. "[ingresso->carro]") sono codificati due volte
+  // nella sorgente di lot (&amp;gt; invece di &gt;): dopo che il DOM li
+  // decodifica una volta, restano entità letterali tipo "&gt;" nel testo.
+  // Un secondo passaggio via textarea le risolve alla forma finale.
+  function decodeEntitiesOnce(str) {
+    const el = document.createElement('textarea');
+    el.innerHTML = str;
+    return el.value;
+  }
+
   function isGreyTimestampFont(node) {
     return node.nodeType === 1 && node.tagName === 'FONT'
       && (node.getAttribute('color') || '').toUpperCase() === '#606060'
@@ -181,9 +191,9 @@
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
 
     const coordSpan = wrap.querySelector('span.msg-pos-tag');
-    const coordRaw = coordSpan ? coordSpan.textContent.replace(/[[\]]/g, '').trim() : null;
+    const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
     const labelSpan = wrap.querySelector('span.msg-tag-pos');
-    const posLabel = labelSpan ? labelSpan.textContent.replace(/[[\]]/g, '').trim() : null;
+    const posLabel = labelSpan ? decodeEntitiesOnce(labelSpan.textContent).replace(/[[\]]/g, '').trim() : null;
 
     // Testo: tutto il blocco meno timestamp/link-avatar/immagini/tag,
     // poi si toglie l'eventuale prefisso "Nome  " o "Nome  - " quando il
