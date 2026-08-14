@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.17
+// @version      0.0.18
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -20,13 +20,23 @@
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
 
+  // Riferimento al pannello scena, assegnato quando renderTimeline lo crea
+  // (arriva dopo i fetch, non subito): il banner lo usa come interruttore
+  // acceso/spento, quindi deve tollerare il caso "non ancora pronto".
+  let scenePanel = null;
+
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.17 — timeline)';
+  banner.textContent = 'lot-chat-viewer (v0.0.18 — clicca per mostrare/nascondere)';
+  banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
-    'background:#222', 'color:#0f0', 'font:12px monospace',
+    'background:#222', 'color:#0f0', 'font:12px monospace', 'cursor:pointer',
     'padding:6px 10px', 'border-radius:4px', 'opacity:0.85',
   ].join(';');
+  banner.addEventListener('click', () => {
+    if (!scenePanel) return;
+    scenePanel.style.display = scenePanel.style.display === 'none' ? '' : 'none';
+  });
 
   const mount = document.body || document.documentElement;
   if (mount) {
@@ -580,7 +590,7 @@
       return;
     }
 
-    let index = chatParsed.messages.length - 1; // parte dall'ultimo stato noto
+    let index = 0; // parte dal primo messaggio della chat
 
     const panel = document.createElement('div');
     panel.id = 'lot-chat-viewer-scene';
@@ -648,6 +658,7 @@
 
     draw();
     document.body.appendChild(panel);
+    scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
 
