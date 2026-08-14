@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.5
+// @version      0.0.6
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.5 — parser scheda/aspetto)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.6 — parser scheda/aspetto)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -41,11 +41,25 @@
 
   // TODO: rendering scena (mappa + modellini) al posto/accanto al testo
 
+  // DOMParser produce un documento il cui base URL è quello dello script
+  // (la pagina di chat), non quello della risposta fetchata: risolvere un
+  // <img src="../lotnew/..."> tramite la proprietà .src darebbe un URL
+  // sbagliato (relativo a /proc/chat/ invece che alla pagina scaricata).
+  // Va sempre letto l'attributo grezzo e risolto a mano con new URL(..).
+  function abs(rawUrl, baseUrl) {
+    if (!rawUrl) return null;
+    try {
+      return new URL(rawUrl, baseUrl).href;
+    } catch (e) {
+      return rawUrl;
+    }
+  }
+
   // --- Parser: pagina scheda PG (proc/schedaPG/sx.asp?ID=...) ---------
   // Tabella a coppie label/valore: td.titoli_pergamena seguito da
   // td.testi_pergamena nella stessa riga. Alcune righe hanno due coppie
   // (Razza/Sesso, Forza/Mente, Destrezza/Esperienza, Carisma/Ex-Esper.).
-  function parseSchedaPG(html) {
+  function parseSchedaPG(html, baseUrl) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const campi = {};
     doc.querySelectorAll('tr').forEach((row) => {
@@ -77,7 +91,7 @@
       mestiere: campi['Mestiere'] || null,
       gilda: campi['Gilda'] || null,
       clan: campi['Clan'] || null,
-      censoUrl: censoImg ? censoImg.src : null,
+      censoUrl: censoImg ? abs(censoImg.getAttribute('src'), baseUrl) : null,
     };
   }
 
@@ -86,10 +100,11 @@
   // coincide con l'ordine z-index reale): sfondo, piedi, corpo base,
   // vestito, eventuali accessori. La tabella armi ha 12 slot fissi
   // (label in td.slot-header, immagine+nome in td.slot-img successivo).
-  function parseAspetto(html) {
+  function parseAspetto(html, baseUrl) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    const layers = Array.from(doc.querySelectorAll('.avatar-inner img')).map((img) => img.src);
+    const layers = Array.from(doc.querySelectorAll('.avatar-inner img'))
+      .map((img) => abs(img.getAttribute('src'), baseUrl));
     const cornice = doc.querySelector('.container img[src*="cornice"]');
     const descFisica = doc.querySelector('.scroll-desc');
     const razzaLabel = doc.querySelector('.scroll-razza');
@@ -113,8 +128,8 @@
       armi.push({
         slot: header.textContent.trim(),
         nome: img ? (img.title || null) : null,
-        immagine: img ? img.src : null,
-        link: link ? link.getAttribute('onclick') || link.href : null,
+        immagine: img ? abs(img.getAttribute('src'), baseUrl) : null,
+        link: link ? link.getAttribute('onclick') || abs(link.getAttribute('href'), baseUrl) : null,
       });
     });
 
@@ -122,7 +137,7 @@
       razza: razzaLabel ? razzaLabel.textContent.trim() : null,
       descrizioneFisica: descFisica ? descFisica.textContent.trim() : null,
       layers,
-      cornice: cornice ? cornice.src : null,
+      cornice: cornice ? abs(cornice.getAttribute('src'), baseUrl) : null,
       armi: armi.filter((a) => a.nome), // scarta gli slot vuoti (senza TITLE)
       descrizioneArmi: descArmi ? descArmi.textContent.replace(/\s+/g, ' ').trim() : null,
     };
@@ -139,9 +154,9 @@
 
   PROBE_ENDPOINTS.forEach(({ label, url, parse }) => {
     fetch(url, { credentials: 'same-origin' })
-      .then((res) => res.text())
-      .then((html) => {
-        console.log(`[lot-chat-viewer] parsed "${label}" per ${PROBE_PG}:`, parse(html));
+      .then((res) => res.text().then((html) => ({ html, baseUrl: res.url })))
+      .then(({ html, baseUrl }) => {
+        console.log(`[lot-chat-viewer] parsed "${label}" per ${PROBE_PG}:`, parse(html, baseUrl));
       })
       .catch((err) => {
         console.error(`[lot-chat-viewer] probe "${label}" fallita:`, err);
