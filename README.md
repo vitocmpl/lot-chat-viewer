@@ -20,12 +20,28 @@ Uno userscript (Tampermonkey/Violentmonkey — funziona su Chrome, Firefox, Edge
 
 ## Installazione
 
-1. Installa un userscript manager nel tuo browser: [Tampermonkey](https://www.tampermonkey.net) (Chrome, Firefox, Edge, Safari, Opera) o in alternativa Violentmonkey. Cercalo nello store estensioni del tuo browser oppure vai sul sito ufficiale.
-2. Apri questo link nel browser dove hai installato l'estensione: [`src/lot-chat-viewer.user.js`](https://raw.githubusercontent.com/vitocmpl/lot-chat-viewer/main/src/lot-chat-viewer.user.js) — Tampermonkey riconosce automaticamente il file e propone l'installazione.
-3. Conferma l'installazione nella finestra che appare.
-4. Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner *"lot-chat-viewer attivo"* — conferma che lo script gira correttamente sulla pagina.
+1. **Installa un userscript manager.** [Tampermonkey](https://www.tampermonkey.net) (consigliato — Chrome, Firefox, Edge, Safari, Opera) o in alternativa Violentmonkey. Cercalo nello store estensioni del tuo browser oppure vai sul sito ufficiale e installalo come una normale estensione.
+2. **Installa lo script.** Con l'estensione installata, apri questo link: [`src/lot-chat-viewer.user.js`](https://raw.githubusercontent.com/vitocmpl/lot-chat-viewer/main/src/lot-chat-viewer.user.js). Tampermonkey lo riconosce automaticamente e apre una schermata di installazione — clicca **Install/Installa**.
+3. **Solo su Chrome/Edge recenti: un passaggio in più.** Da qualche versione, questi browser richiedono un permesso esplicito perché un'estensione come Tampermonkey possa eseguire script all'interno delle pagine (Manifest V3). Se dopo l'installazione lo script non sembra attivarsi, questa è la causa più probabile:
+   - Vai su `chrome://extensions` (su Edge: `edge://extensions`)
+   - Attiva l'interruttore **"Modalità sviluppatore" / "Developer mode"** in alto a destra nella pagina
+   - Sulla card di Tampermonkey dovrebbe comparire un nuovo interruttore **"Allow User Scripts" / "Consenti script utente"** — attivalo
+   - Ricarica la pagina di lot su cui vuoi usare lo script
+
+   *(Firefox e Safari non hanno questa limitazione, il passaggio 3 non serve.)*
+4. **Verifica che funzioni.** Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner verde *"lot-chat-viewer attivo"* — conferma che lo script gira correttamente sulla pagina.
 
 Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampermonkey (grazie a `@updateURL`), senza bisogno di reinstallare a mano.
+
+### Non vedi il banner? Troubleshooting
+
+1. Apri la console del browser (F12 → tab **Console**) sulla pagina di lot e cerca righe che iniziano con `[lot-chat-viewer]`.
+2. **Nessuna riga, nessun errore** → lo script non si sta eseguendo affatto sulla pagina. Controlla, in ordine:
+   - il passaggio 3 sopra (Allow User Scripts) su Chrome/Edge — causa più comune
+   - che l'interruttore generale di Tampermonkey (icona dell'estensione in barra) sia ON, non in pausa
+   - nella dashboard di Tampermonkey (Installed userscripts), che "lot-chat-viewer" sia abilitato
+   - che l'URL della pagina inizi con `https://www.extremelot.eu/proc/chat/chat_salvate` (lo script non si attiva altrove)
+3. **La riga c'è, dice "banner agganciato a BODY", ma non lo vedi comunque** → probabile conflitto CSS con la pagina; apri una issue nel repo con uno screenshot.
 
 ## Stato
 
