@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.40
+// @version      0.0.41
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -854,6 +854,25 @@
       equipModalBody.appendChild(buildEquipSection('Indossati', indossati, { emptyText: 'Nessun oggetto indossato' }));
       equipModalBody.appendChild(buildEquipSection('Con sé', conSe, { emptyText: 'Nessun oggetto con sé' }));
       equipModalBody.appendChild(buildEquipSection('Equip bellico', armi, { showEmptySlots: true }));
+
+      // Non presente nel POC (lì non c'era questo dato): il paragrafo
+      // descrittivo di ARMInew26.asp ("Questo quanto si osserva di NOME,
+      // tiene..."), già estratto in parseAspetto ma finora inutilizzato.
+      const descrizioneArmi = pg.aspetto && pg.aspetto.descrizioneArmi;
+      if (descrizioneArmi) {
+        const descSection = document.createElement('div');
+        descSection.style.cssText = 'margin-top:12px;';
+        const descTitle = document.createElement('div');
+        descTitle.textContent = 'Descrizione';
+        descTitle.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR_TEXT_DIM};margin-bottom:6px;`;
+        const descText = document.createElement('div');
+        descText.textContent = descrizioneArmi;
+        descText.style.cssText = `font-size:12.5px;line-height:1.55;color:${COLOR_TEXT};`;
+        descSection.appendChild(descTitle);
+        descSection.appendChild(descText);
+        equipModalBody.appendChild(descSection);
+      }
+
       equipModalBack.onclick = () => { closeEquipModal(); openSchedaPopup(pg); };
       equipShell.overlay.style.display = 'flex';
     }
