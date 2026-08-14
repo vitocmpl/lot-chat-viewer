@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.2
+// @version      0.0.3
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -27,7 +27,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.1 — hello world)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.3 — probe same-origin)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -43,12 +43,31 @@
   }
 
   // TODO: parsing del transcript chat salvata già presente nella pagina
-  // (stesso formato "HH:MM Speaker [tag] testo" già mappato in lot-poc-3d)
-
-  // TODO: fetch same-origin verso pagina scheda PG / mappa quando serve
-  // arricchire un personaggio o un luogo citato in chat, con cache per
-  // singola sessione/chat (i dati di un PG possono cambiare tra una
-  // giocata e l'altra, non vanno tenuti in cache a lungo termine)
+  // (DOM di .lot-chat, non il formato a riga singola del vecchio POC)
 
   // TODO: rendering scena (mappa + modellini) al posto/accanto al testo
+
+  // --- Probe: verifica che il fetch same-origin verso altri endpoint di
+  // lot funzioni con la sessione del giocatore già loggata in pagina,
+  // prima di costruire il parsing vero sopra questi dati. Sola lettura:
+  // GET soltanto, nessun dato inviato oltre l'ID PG già pubblico in chat.
+  const PROBE_PG = 'Alderick';
+  const PROBE_ENDPOINTS = [
+    { label: 'scheda PG (sx.asp)', url: `https://www.extremelot.eu/proc/schedaPG/sx.asp?ID=${PROBE_PG}` },
+    { label: 'modellino/vestiti (ARMInew26.asp)', url: `https://www.extremelot.eu/proc/ARMInew26.asp?ID=${PROBE_PG}&scheda=` },
+  ];
+
+  PROBE_ENDPOINTS.forEach(({ label, url }) => {
+    fetch(url, { credentials: 'same-origin' })
+      .then((res) => {
+        console.log(`[lot-chat-viewer] probe "${label}" →`, res.status, res.url);
+        return res.text();
+      })
+      .then((text) => {
+        console.log(`[lot-chat-viewer] probe "${label}" primi 500 char:\n`, text.slice(0, 500));
+      })
+      .catch((err) => {
+        console.error(`[lot-chat-viewer] probe "${label}" fallita:`, err);
+      });
+  });
 })();
