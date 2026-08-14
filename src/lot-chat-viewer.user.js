@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.7
+// @version      0.0.8
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.7 — parser chat)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.8 — parser chat)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -241,8 +241,8 @@
   console.log('[lot-chat-viewer] chat parsata:', chatParsed.locationName, chatParsed.dateLabel,
     '—', chatParsed.messages.length, 'messaggi');
   const roster = Array.from(new Set(chatParsed.messages.map((m) => m.speaker)));
-  console.log('[lot-chat-viewer] roster:', roster);
-  console.log('[lot-chat-viewer] primi 8 messaggi:', chatParsed.messages.slice(0, 8));
+  console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
+  console.log('[lot-chat-viewer] primi 8 messaggi:', JSON.stringify(chatParsed.messages.slice(0, 8), null, 2));
 
   // --- Probe: verifica che il fetch same-origin funzioni e che i parser
   // producano dati sensati, prima di collegare tutto al rendering. Sola
