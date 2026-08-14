@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.19
+// @version      0.0.20
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.19 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.20 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -460,6 +460,17 @@
   // intera chat fino alla fine, stessa logica di lot-poc-3d (lì costruito
   // in tempo reale scorrendo la timeline; qui in un colpo solo perché non
   // abbiamo ancora una timeline — il risultato finale è identico).
+  // Colore di identità per PG, derivato dall'hash del nome (nessuna scelta
+  // manuale) — usato solo per il marcatore della cella attiva per ora.
+  function hashInt(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+  }
+  function pgHue(nome) {
+    return hashInt(nome) % 360;
+  }
+
   function buildStackOrder(messages) {
     const order = [];
     messages.forEach((m) => {
@@ -496,6 +507,23 @@
     const positions = lastKnownPositions(messages);
     const stackOrder = buildStackOrder(messages);
     const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
+
+    // Cella evidenziata persistente del PG attivo (colore = sua identità),
+    // dietro ai token — nel token compatto non c'è glow extra sull'icona
+    // (già bordata di suo, sarebbe ridondante): l'indicatore vero è questo
+    // marcatore di cella più l'ordine dello stack (chi parla va in cima).
+    const activePos = activeSpeaker ? positions[activeSpeaker] : null;
+    if (activePos && activePos.col >= 0 && activePos.col < mappa.cols && activePos.row >= 0 && activePos.row < mappa.rows) {
+      const hue = pgHue(activeSpeaker);
+      const activeCell = document.createElement('div');
+      activeCell.style.cssText = [
+        'position:absolute', `left:${activePos.col * cellW}px`, `top:${activePos.row * cellH}px`,
+        `width:${cellW}px`, `height:${cellH}px`, 'pointer-events:none',
+        `border:2px solid hsl(${hue} 62% 52%)`, `background:hsl(${hue} 62% 52% / 0.2)`,
+        'box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35)',
+      ].join(';');
+      stage.appendChild(activeCell);
+    }
 
     const placed = pgRecords
       .map((pg) => ({ pg, pos: positions[pg.nome] }))
@@ -552,10 +580,8 @@
 
       const badge = document.createElement('div');
       badge.style.cssText = [
-        `width:${iconSize}px`, `height:${iconSize}px`,
-        `border:2px solid ${isActive ? '#FFD866' : '#F8E9AA'}`, 'border-radius:4px',
-        'background:rgba(0,0,0,0.6)', 'overflow:hidden',
-        `box-shadow:0 0 ${isActive ? '10px 3px' : '6px'} rgba(248,233,170,${isActive ? '0.9' : '0.4'})`,
+        `width:${iconSize}px`, `height:${iconSize}px`, 'border:2px solid #F8E9AA', 'border-radius:4px',
+        'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
         'display:flex', 'align-items:center', 'justify-content:center',
       ].join(';');
       if (pg.censoUrl) {
@@ -570,7 +596,7 @@
 
       const label = document.createElement('div');
       label.textContent = pg.nome;
-      label.style.cssText = 'font-size:9px;color:#F8E9AA;text-shadow:0 0 4px #000;margin-top:1px;white-space:nowrap;';
+      label.style.cssText = 'font-size:9px;color:#F8E9AA;text-shadow:0 0 4px #000,0 0 8px #000;margin-top:1px;white-space:nowrap;';
 
       token.appendChild(badge);
       token.appendChild(label);
