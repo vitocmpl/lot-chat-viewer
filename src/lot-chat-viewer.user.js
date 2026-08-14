@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.34
+// @version      0.0.35
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -664,6 +664,11 @@
     // solo tokenLayer/activeCell vengono aggiornati passo per passo.
     const LABEL_MARGIN_LEFT = 18, LABEL_MARGIN_TOP = 16;
     const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
+    // Sotto questa soglia il modellino intero non si apprezzerebbe comunque
+    // (troppo piccolo) e sconfina più facilmente dalla cella: si passa al
+    // token compatto stile "stemma", come lo strumento mappa reale.
+    const ICON_ZOOM_THRESHOLD = 2.2;
+    let lastCompact = null;
     const nativeCellW = mappa.mapWidth / mappa.cols;
     const nativeCellH = mappa.mapHeight / mappa.rows;
     const view = { zoom: 1, panX: 0, panY: 0 };
@@ -825,11 +830,31 @@
       zoomReadout.textContent = Math.round(view.zoom * 100) + '%';
       // Contro-scala il token compatto (75% della cella nativa) rispetto al
       // solo fitScale, non allo zoom interattivo — stesso principio del
-      // POC (--token-icon-scale): a zoom 100% il badge rende alla
-      // dimensione "vera" indipendentemente da quanto la mappa si è dovuta
-      // rimpicciolire per stare nel riquadro quadrato.
+      // POC (--token-icon-scale/--icon-label-scale): a zoom 100% badge e
+      // nome rendono alla dimensione "vera" indipendentemente da quanto la
+      // mappa si è dovuta rimpicciolire per stare nel riquadro quadrato.
       tokenLayer.style.setProperty('--token-icon-scale', fitScale ? (1 / fitScale) : 1);
+      tokenLayer.style.setProperty('--icon-label-scale', fitScale ? (1 / fitScale) : 1);
+      // Nome sotto il modellino intero: congelato alla dimensione che ha
+      // già, a schermo, appena prima dello switch token→modellino (zoom =
+      // ICON_ZOOM_THRESHOLD) — oltre quel punto non continua a crescere
+      // con lo zoom insieme al resto scalato da stageZoom.
+      tokenLayer.style.setProperty('--label-scale', view.zoom > 0 ? (ICON_ZOOM_THRESHOLD / view.zoom) : 1);
       renderRuler();
+
+      // Sotto la soglia: token compatto stile stemma. Sopra: modellino
+      // intero a layer. Il cambio di modalità richiede di ricostruire i
+      // token (le due rese sono strutturalmente diverse, non solo un
+      // display:none/flex come nel POC, che invece le tiene entrambe
+      // sempre nel DOM) — ma solo quando si attraversa davvero la soglia,
+      // non ad ogni tick di zoom.
+      const compact = view.zoom < ICON_ZOOM_THRESHOLD;
+      if (compact !== lastCompact) {
+        lastCompact = compact;
+        if (typeof updateTokens === 'function') {
+          updateTokens(chatParsed.messages.slice(0, index + 1), pgRecords, { recenter: false });
+        }
+      }
     }
 
     function resetView() {
@@ -959,7 +984,85 @@
       animatePanTo(view.panX + (centerX - screenX), view.panY + (centerY - screenY), 420);
     }
 
-    function updateTokens(messages, pgRecords) {
+    // Token compatto stile "stemma": icona bordata + nome sotto, larghezza
+    // fissa 46px condivisa col modellino intero (stesso .token-frame).
+    function buildCompactIcon(pg, iconSize) {
+      const icon = document.createElement('div');
+      icon.style.cssText = 'display:flex;align-items:center;justify-content:center;width:46px;position:relative;';
+
+      const iconBadge = document.createElement('div');
+      iconBadge.style.cssText = [
+        `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto', 'overflow:hidden',
+        'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
+        'transform:scale(var(--token-icon-scale,1))',
+      ].join(';');
+      if (pg.censoUrl) {
+        const img = document.createElement('img');
+        img.src = pg.censoUrl;
+        img.alt = '';
+        img.draggable = false;
+        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+        iconBadge.appendChild(img);
+      } else {
+        iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
+      }
+
+      const iconLabel = document.createElement('div');
+      iconLabel.textContent = pg.nome;
+      iconLabel.style.cssText = [
+        'position:absolute', 'top:100%', 'left:50%', 'margin-top:1px',
+        'transform:translateX(-50%) scale(var(--icon-label-scale,1))', 'transform-origin:top center',
+        'font-family:Verdana,sans-serif', 'font-size:9px', 'color:#F8E9AA',
+        'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
+      ].join(';');
+
+      icon.appendChild(iconBadge);
+      icon.appendChild(iconLabel);
+      return icon;
+    }
+
+    // Modellino intero: layer sovrapposti (corpo, vestito, eventuali
+    // accessori — pg.aspetto.layers è già nell'ordine di stacking corretto),
+    // ombra ellittica ai piedi, nome sotto ancorato al fondo dello sprite.
+    function buildFullSprite(pg) {
+      const counter = document.createElement('div');
+      counter.style.cssText = 'position:relative;width:100%;transform-origin:bottom center;';
+
+      const sprite = document.createElement('div');
+      sprite.style.cssText = 'position:relative;width:23px;height:41px;margin:0 auto;';
+      ((pg.aspetto && pg.aspetto.layers) || []).forEach((url) => {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.draggable = false;
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+        sprite.appendChild(img);
+      });
+      const shadow = document.createElement('div');
+      shadow.style.cssText = [
+        'position:absolute', 'bottom:-2px', 'left:50%', 'transform:translateX(-50%)',
+        'width:24px', 'height:7px', 'background:radial-gradient(ellipse, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 72%)',
+      ].join(';');
+      sprite.appendChild(shadow);
+      counter.appendChild(sprite);
+
+      const nametag = document.createElement('div');
+      nametag.textContent = pg.nome;
+      nametag.style.cssText = [
+        'position:absolute', 'top:100%', 'left:50%', 'margin-top:1px',
+        'transform:translateX(-50%) scale(var(--label-scale,1))', 'transform-origin:top center',
+        'font-family:Verdana,sans-serif', 'font-size:9px', 'color:#F8E9AA',
+        'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap', 'pointer-events:none',
+      ].join(';');
+      counter.appendChild(nametag);
+      return counter;
+    }
+
+    function updateTokens(messages, pgRecords, opts) {
+      const recenter = !opts || opts.recenter !== false;
+      const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
       const positions = lastKnownPositions(messages);
       const stackOrder = buildStackOrder(messages);
@@ -981,7 +1084,7 @@
         lastActiveCoordLabel = null;
       }
       refreshIdleCoord();
-      centerOnActiveToken(activePos);
+      if (recenter) centerOnActiveToken(activePos);
 
       const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
       const placed = pgRecords
@@ -1031,44 +1134,18 @@
           'width:0', 'height:0', `z-index:${isActive ? 9999 : (zIndex || 10)}`,
         ].join(';');
 
-        // "badge" centra sull'ancora E contro-scala il fitScale in un solo
-        // transform — il figlio "label" (assoluto sotto, vedi sotto) eredita
-        // la stessa scala essendo dentro badge, coprendo così anche il suo
-        // equivalente --icon-label-scale nel POC senza doverlo applicare
-        // separatamente (stesso valore in entrambi i casi nel POC).
-        const badge = document.createElement('div');
-        badge.style.cssText = [
-          'position:absolute', 'left:0', 'top:0',
-          'transform:translate(-50%,-50%) scale(var(--token-icon-scale,1))',
-          `width:${iconSize}px`, `height:${iconSize}px`,
-        ].join(';');
+        // "frame" fa l'ancoraggio: -50% orizzontale sempre (centrato sulla
+        // cella), verticale dipende dalla modalità — -50% per il token
+        // compatto (icona centrata per intero, come nel POC), -100% per il
+        // modellino intero (piedi ancorati al centro cella, il corpo sale
+        // sopra). La percentuale si risolve sull'altezza reale del
+        // contenuto (icona o sprite), qualunque essa sia.
+        const frame = document.createElement('div');
+        const anchorY = compact ? '-50%' : '-100%';
+        frame.style.cssText = `position:absolute;left:0;top:0;width:46px;transform:translate(-50%, ${anchorY});`;
+        frame.appendChild(compact ? buildCompactIcon(pg, iconSize) : buildFullSprite(pg));
 
-        const art = document.createElement('div');
-        art.style.cssText = [
-          'position:absolute', 'inset:0', 'border:2px solid #F8E9AA', 'border-radius:4px',
-          'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
-          'display:flex', 'align-items:center', 'justify-content:center',
-        ].join(';');
-        if (pg.censoUrl) {
-          const img = document.createElement('img');
-          img.src = pg.censoUrl;
-          img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-          art.appendChild(img);
-        } else {
-          art.textContent = pg.nome.charAt(0).toUpperCase();
-          art.style.color = '#F8E9AA';
-        }
-
-        const label = document.createElement('div');
-        label.textContent = pg.nome;
-        label.style.cssText = [
-          'position:absolute', 'top:100%', 'left:50%', 'transform:translateX(-50%)', 'margin-top:1px',
-          'font-size:9px', 'color:#F8E9AA', 'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
-        ].join(';');
-
-        badge.appendChild(art);
-        badge.appendChild(label);
-        token.appendChild(badge);
+        token.appendChild(frame);
         tokenLayer.appendChild(token);
       });
     }
