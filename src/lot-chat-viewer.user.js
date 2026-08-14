@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.9
+// @version      0.0.10
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.9 — parser chat)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.10 — risoluzione PG)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -254,23 +254,78 @@
   console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
   console.log('[lot-chat-viewer] primi 8 messaggi:', JSON.stringify(chatParsed.messages.slice(0, 8), null, 2));
 
-  // --- Probe: verifica che il fetch same-origin funzioni e che i parser
-  // producano dati sensati, prima di collegare tutto al rendering. Sola
-  // lettura: GET soltanto, nessun dato inviato oltre l'ID PG già pubblico.
-  const PROBE_PG = 'Alderick';
-  const PROBE_ENDPOINTS = [
-    { label: 'scheda', url: `https://www.extremelot.eu/proc/schedaPG/sx.asp?ID=${PROBE_PG}`, parse: parseSchedaPG },
-    { label: 'aspetto', url: `https://www.extremelot.eu/proc/ARMInew26.asp?ID=${PROBE_PG}&scheda=`, parse: parseAspetto },
-  ];
+  // --- Risoluzione PG: per ogni parlante del roster, fetch scheda+aspetto
+  // UNA SOLA VOLTA (cache in memoria, valida per tutta questa sessione di
+  // replay — i dati non cambiano mentre si legge una chat già giocata).
+  // Sola lettura: GET soltanto, nessun dato inviato oltre il nome PG già
+  // pubblico in chat.
+  //
+  // Regola di precedenza: razza/sesso/censo letti dalla chat stessa
+  // (icona razza + stemma inline nei messaggi) VINCONO su quelli fetchati
+  // da sx.asp, perché la chat è la fotografia del momento della giocata
+  // mentre il fetch restituisce lo stato di oggi del personaggio (può
+  // essere cambiato nel frattempo). Il resto (forza/mente/destrezza,
+  // aspetto/modellino) non ha un equivalente nella chat, quindi resta
+  // sempre quello fetchato live.
+  function parseRazzaIconFilename(url) {
+    if (!url) return { razza: null, sesso: null };
+    const file = url.split('/').pop() || '';
+    const m = file.match(/^([A-Z]*)([MF])\.gif$/i);
+    if (!m) return { razza: null, sesso: null };
+    return {
+      razza: m[1] ? m[1].toUpperCase() : null,
+      sesso: m[2].toUpperCase() === 'M' ? 'Maschio' : 'Femmina',
+    };
+  }
 
-  PROBE_ENDPOINTS.forEach(({ label, url, parse }) => {
-    fetch(url, { credentials: 'same-origin' })
-      .then((res) => res.text().then((html) => ({ html, baseUrl: res.url })))
-      .then(({ html, baseUrl }) => {
-        console.log(`[lot-chat-viewer] parsed "${label}" per ${PROBE_PG}:`, parse(html, baseUrl));
-      })
-      .catch((err) => {
-        console.error(`[lot-chat-viewer] probe "${label}" fallita:`, err);
-      });
-  });
+  function buildChatDerivedRoster(messages) {
+    const info = {};
+    messages.forEach((m) => {
+      if (!info[m.speaker]) info[m.speaker] = {};
+      if (m.razzaIcon && !info[m.speaker].razzaIcon) info[m.speaker].razzaIcon = m.razzaIcon;
+      if (m.censoUrl && !info[m.speaker].censoUrl) info[m.speaker].censoUrl = m.censoUrl;
+    });
+    Object.keys(info).forEach((speaker) => {
+      Object.assign(info[speaker], parseRazzaIconFilename(info[speaker].razzaIcon));
+    });
+    return info;
+  }
+
+  const pgFetchCache = new Map(); // nome -> Promise<{ scheda, aspetto }>
+
+  function fetchPGData(nome) {
+    if (pgFetchCache.has(nome)) return pgFetchCache.get(nome);
+    const id = encodeURIComponent(nome);
+    const promise = Promise.all([
+      fetch(`https://www.extremelot.eu/proc/schedaPG/sx.asp?ID=${id}`, { credentials: 'same-origin' })
+        .then((res) => res.text().then((html) => parseSchedaPG(html, res.url))),
+      fetch(`https://www.extremelot.eu/proc/ARMInew26.asp?ID=${id}&scheda=`, { credentials: 'same-origin' })
+        .then((res) => res.text().then((html) => parseAspetto(html, res.url))),
+    ]).then(([scheda, aspetto]) => ({ scheda, aspetto }));
+    pgFetchCache.set(nome, promise);
+    return promise;
+  }
+
+  function buildPGRecord(nome, chatDerived, fetched) {
+    const cd = chatDerived[nome] || {};
+    return {
+      nome,
+      razza: cd.razza || fetched.scheda.razza,
+      sesso: cd.sesso || fetched.scheda.sesso,
+      censoUrl: cd.censoUrl || fetched.scheda.censoUrl,
+      forza: fetched.scheda.forza,
+      mente: fetched.scheda.mente,
+      destrezza: fetched.scheda.destrezza,
+      aspetto: fetched.aspetto,
+    };
+  }
+
+  const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
+  Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched))))
+    .then((pgRecords) => {
+      console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
+    })
+    .catch((err) => {
+      console.error('[lot-chat-viewer] errore nella risoluzione PG:', err);
+    });
 })();
