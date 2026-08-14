@@ -29,9 +29,18 @@ Uno userscript (Tampermonkey/Violentmonkey — funziona su Chrome, Firefox, Edge
    - Ricarica la pagina di lot su cui vuoi usare lo script
 
    *(Firefox e Safari non hanno questa limitazione, il passaggio 3 non serve.)*
-4. **Verifica che funzioni.** Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner verde *"lot-chat-viewer attivo"* — conferma che lo script gira correttamente sulla pagina.
+4. **Verifica che funzioni.** Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner *"lot-chat-viewer — clicca per mostrare/nascondere"* — conferma che lo script gira correttamente sulla pagina.
 
 Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampermonkey (grazie a `@updateURL`), senza bisogno di reinstallare a mano.
+
+## Come usarlo (replay di una chat salvata)
+
+1. **In gioco**, apri il **Registro CHAT** (in fondo alla pagina, sotto l'elenco delle chat) e seleziona la chat salvata che vuoi rileggere — si apre una nuova finestra su `chat_salvate*.asp`.
+2. **Porta il tuo PG, sulla mappa di lot, nella stessa locazione della chat che vuoi rileggere** (prima o dopo aver aperto il registro, l'ordine non conta). È necessario perché lo script recupera l'immagine e la griglia della mappa dalla pagina mappa reale del luogo in cui il tuo PG si trova *ora* — non da dove si trovava quando quella chat fu giocata. Se il PG è altrove, lo script non trova nessuna mappa da mostrare.
+3. Torna sulla finestra della chat salvata aperta al passo 1: lo script si attiva da solo, sostituendo il testo grezzo con la scena (mappa a sinistra, timeline dei messaggi a destra). Se non parte da solo, ricarica la pagina.
+4. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat.
+
+Nota: la mappa mostra solo l'immagine e la griglia del luogo — i movimenti dei personaggi che vedi nella scena vengono ricostruiti dalle coordinate scritte nella chat stessa (tag `[G4]` ecc.), non da una posizione live sulla mappa reale.
 
 ### Non vedi il banner? Troubleshooting
 
@@ -45,7 +54,21 @@ Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampe
 
 ## Stato
 
-Versione iniziale "hello world": lo script si attiva sulla pagina giusta e lo segnala con un banner, senza ancora leggere/visualizzare la chat. Vedi le issue del repo per lo stato di avanzamento.
+Replay funzionante di una chat salvata:
+
+- Mappa del luogo con griglia, pan (trascinamento) e zoom (rotellina, verso il cursore), righello lettere/numeri, coordinata sotto il cursore
+- Personaggi come stemma compatto (zoom basso) o modellino intero a layer corpo/vestito (zoom alto), con ventaglio automatico quando più PG condividono una cella, PG che sta parlando evidenziato (cella colorata, e sul modellino intero anche freccia + glow)
+- Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
+- Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
+- Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro — mai visti su una chat reale finora) restano visibili con una nota, invece di sparire in silenzio
+
+Non ancora presente:
+
+- Modalità chat **live** (solo chat salvate, per ora)
+- Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
+- Selettore di luogo/chat (qui non serve: la chat è già quella aperta nella pagina)
+
+Vedi le issue del repo per lo stato di avanzamento dettagliato.
 
 ## Licenza
 
