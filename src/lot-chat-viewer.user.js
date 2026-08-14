@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.26
+// @version      0.0.27
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.26 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.27 — lista messaggi)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -475,6 +475,41 @@
   function pgHue(nome) {
     return hashInt(nome) % 360;
   }
+  function pgAccentColor(nome) {
+    return `hsl(${pgHue(nome)} 62% 52%)`;
+  }
+
+  // A..Z poi AA, AB... — stessa formula di lot-poc-3d/chat_mappa_quest.asp
+  // (drawLabels), inversa di colIndexFromLetters usata per mostrare la
+  // coordinata corrente nella card espansa.
+  function colLetter(index) {
+    let letter = String.fromCharCode(65 + (index % 26));
+    if (index >= 26) letter = String.fromCharCode(65 + Math.floor(index / 26) - 1) + letter;
+    return letter;
+  }
+
+  function raceIconUrl(razza, sesso) {
+    if (!razza) return null;
+    return 'https://www.extremelot.eu/lotnew/img/razze/' + razza.toUpperCase() + (sesso === 'Femmina' ? 'F' : 'M') + '.gif';
+  }
+
+  // Avatar della card: censo reale (stemma) se disponibile, altrimenti
+  // iniziale del nome su sfondo colore-identità.
+  function fillAvatar(el, pg) {
+    el.innerHTML = '';
+    if (pg.censoUrl) {
+      el.style.background = 'transparent';
+      const img = document.createElement('img');
+      img.src = pg.censoUrl;
+      img.alt = '';
+      img.draggable = false;
+      img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      el.appendChild(img);
+    } else {
+      el.style.background = pgAccentColor(pg.nome);
+      el.textContent = pg.nome.charAt(0);
+    }
+  }
 
   function buildStackOrder(messages) {
     const order = [];
@@ -653,7 +688,11 @@
     // già quella aperta nella pagina, non c'è nulla da selezionare.
     const COLOR_BG = '#120f0c';
     const COLOR_SURFACE = '#1c1610';
+    const COLOR_SURFACE2 = '#281f16';
     const COLOR_LINE = '#3a2c1e';
+    const COLOR_EMBER = '#d9803f';
+    const COLOR_EMBER_DIM = '#8a5227';
+    const COLOR_GOLD = '#d9b86a';
     const COLOR_TEXT = '#ece3d6';
     const COLOR_TEXT_DIM = '#a89a89';
 
@@ -723,12 +762,112 @@
     controls.appendChild(nextBtn);
     sidebarHeader.appendChild(controls);
 
-    const msgBox = document.createElement('div');
-    msgBox.style.cssText = [
-      'flex:1', 'min-height:0', 'overflow-y:auto', 'padding:10px 12px',
-      `background:${COLOR_BG}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'box-sizing:border-box',
-    ].join(';');
-    sidebar.appendChild(msgBox);
+    const sidebarList = document.createElement('div');
+    sidebarList.style.cssText = 'flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:2px;';
+    sidebar.appendChild(sidebarList);
+
+    // Card espansa del messaggio attivo (quello mostrato sulla mappa in
+    // questo momento della timeline) — il testo resta grezzo per ora, la
+    // suddivisione in fumetti «azione»/parlato (splitSegments nel POC) è
+    // il prossimo step separato.
+    function buildExpandedCard(pg, msg, activePos) {
+      const card = document.createElement('div');
+      card.style.cssText = [
+        `background:${COLOR_SURFACE2}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`, 'border-radius:14px',
+        `box-shadow:inset 4px 0 0 0 ${pgAccentColor(pg.nome)}`,
+        'padding:11px 13px', 'display:flex', 'flex-direction:column', 'gap:8px',
+      ].join(';');
+
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;gap:9px;flex-wrap:wrap;';
+
+      const avatar = document.createElement('div');
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      fillAvatar(avatar, pg);
+      header.appendChild(avatar);
+
+      const name = document.createElement('div');
+      name.textContent = pg.nome;
+      name.style.cssText = `font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:${COLOR_GOLD};flex:1;`;
+      header.appendChild(name);
+
+      const raceUrl = raceIconUrl(pg.razza, pg.sesso);
+      if (raceUrl) {
+        const raceIcon = document.createElement('img');
+        raceIcon.src = raceUrl;
+        raceIcon.alt = '';
+        raceIcon.draggable = false;
+        raceIcon.style.cssText = 'width:10px;height:10px;flex:0 0 auto;';
+        header.appendChild(raceIcon);
+      }
+
+      if (activePos) {
+        const coord = document.createElement('div');
+        coord.textContent = colLetter(activePos.col) + (activePos.row + 1);
+        coord.title = 'Posizione corrente sulla griglia';
+        coord.style.cssText = 'font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:800;color:#f0d080;background:#803030;border-radius:6px;padding:2px 8px;';
+        header.appendChild(coord);
+      }
+
+      const time = document.createElement('div');
+      time.textContent = msg.time;
+      time.style.cssText = `font-size:10.5px;font-weight:600;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;`;
+      header.appendChild(time);
+
+      card.appendChild(header);
+
+      if (!activePos) {
+        const gapNote = document.createElement('div');
+        gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
+        gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
+        card.appendChild(gapNote);
+      }
+
+      const body = document.createElement('div');
+      body.textContent = msg.testo;
+      body.style.cssText = 'font-size:12.5px;line-height:1.5;';
+      card.appendChild(body);
+
+      return card;
+    }
+
+    // Riga compatta nello stream: click apre esattamente questo messaggio.
+    function buildCompactCard(pg, msg, idx) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.style.cssText = [
+        'appearance:none', 'display:flex', 'align-items:center', 'gap:8px', 'text-align:left', 'width:100%',
+        'padding:7px 9px', 'border-radius:10px', `background:${COLOR_SURFACE2}`, `border:1px solid ${COLOR_LINE}`,
+        'cursor:pointer', 'color:inherit', 'font:inherit',
+      ].join(';');
+      row.addEventListener('mouseenter', () => { row.style.borderColor = COLOR_EMBER_DIM; });
+      row.addEventListener('mouseleave', () => { row.style.borderColor = COLOR_LINE; });
+
+      const avatar = document.createElement('div');
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      fillAvatar(avatar, pg);
+      row.appendChild(avatar);
+
+      const cbody = document.createElement('div');
+      cbody.style.cssText = 'min-width:0;flex:1;';
+      const nm = document.createElement('div');
+      nm.textContent = pg.nome;
+      nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
+      const pv = document.createElement('div');
+      pv.textContent = msg.testo;
+      pv.style.cssText = `font-size:10.5px;color:${COLOR_TEXT_DIM};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      cbody.appendChild(nm);
+      cbody.appendChild(pv);
+      row.appendChild(cbody);
+
+      const time = document.createElement('div');
+      time.textContent = msg.time;
+      time.style.cssText = `font-size:10px;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;flex:0 0 auto;`;
+      row.appendChild(time);
+
+      row.addEventListener('click', () => { index = idx; draw(); });
+      return row;
+    }
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
@@ -736,18 +875,23 @@
       stageSlot.innerHTML = '';
       stageSlot.appendChild(buildStageElement(messages, pgRecords, mappa, rect.width, rect.height));
 
-      const current = chatParsed.messages[index];
-      msgBox.innerHTML = '';
-      const head = document.createElement('div');
-      head.textContent = current.time + ' — ' + current.speaker + (current.posLabel ? ' (' + current.posLabel + ')' : '');
-      head.style.cssText = 'font-weight:bold;font-size:12px;color:#F8E9AA;margin-bottom:5px;';
-      const body = document.createElement('div');
-      body.textContent = current.testo;
-      body.style.cssText = 'font-size:12px;line-height:1.5;';
-      msgBox.appendChild(head);
-      msgBox.appendChild(body);
+      // Posizioni note "fino ad ora" nella timeline (stesso sottoinsieme
+      // usato per la mappa): solo la card espansa mostra la coordinata,
+      // le righe compatte no — stessa scelta del POC.
+      const positionsNow = lastKnownPositions(messages);
 
-      counter.textContent = (index + 1) + ' di ' + chatParsed.messages.length + ' · ' + current.time;
+      sidebarList.innerHTML = '';
+      chatParsed.messages.forEach((msg, i) => {
+        const pg = pgRecords.find((p) => p.nome === msg.speaker);
+        if (!pg) return;
+        sidebarList.appendChild(
+          i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
+        );
+      });
+      const activeEl = sidebarList.children[index];
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+
+      counter.textContent = (index + 1) + ' di ' + chatParsed.messages.length + ' · ' + chatParsed.messages[index].time;
       prevBtn.disabled = index <= 0;
       nextBtn.disabled = index >= chatParsed.messages.length - 1;
     }
