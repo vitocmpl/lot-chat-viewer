@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.29
+// @version      0.0.30
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.29 — fumetti + tag modali)';
+  banner.textContent = 'lot-chat-viewer (v0.0.30 — in-flow al posto di .lot-chat)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -742,11 +742,14 @@
     const COLOR_TEXT = '#ece3d6';
     const COLOR_TEXT_DIM = '#a89a89';
 
+    // In-flow (non fixed): va esattamente al posto di .lot-chat, non
+    // sopra a tutta la pagina — un overlay fixed a schermo intero
+    // coprirebbe anche .lot-title/.lot-subtitle, che devono restare
+    // visibili sopra invece di finire nascosti dietro il nostro pannello.
     const panel = document.createElement('div');
     panel.id = 'lot-chat-viewer-scene';
     panel.style.cssText = [
-      'position:fixed', 'inset:0', 'z-index:2147483646', 'box-sizing:border-box',
-      `background:${COLOR_BG}`, `color:${COLOR_TEXT}`,
+      'box-sizing:border-box', `background:${COLOR_BG}`, `color:${COLOR_TEXT}`,
       'font-family:-apple-system,"Segoe UI",system-ui,sans-serif',
       'padding:14px', 'display:flex', 'overflow:hidden',
     ].join(';');
@@ -993,14 +996,29 @@
     prevBtn.addEventListener('click', () => { if (index > 0) { index -= 1; draw(); } });
     nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) { index += 1; draw(); } });
 
-    document.body.appendChild(panel);
-    draw(); // dopo l'append: serve il layout reale (getBoundingClientRect) per dimensionare la mappa
-    scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
-
-    // La scena parte visibile: nasconde subito il testo grezzo sotto,
-    // coerente con lo stato "acceso" gestito dal banner.
+    // Va inserito subito dopo .lot-chat (non in coda al body): resta così
+    // nel punto naturale del layout, sotto title/subtitle che restano
+    // visibili sopra invariati. .lot-chat va nascosto PRIMA di misurare
+    // la posizione del pannello, altrimenti il suo testo (ancora
+    // visibile) spingerebbe il pannello più in basso di dove deve stare.
     const originalChat = document.querySelector('.lot-chat');
     if (originalChat) originalChat.style.display = 'none';
+
+    if (originalChat && originalChat.parentNode) {
+      originalChat.parentNode.insertBefore(panel, originalChat.nextSibling);
+    } else {
+      document.body.appendChild(panel);
+    }
+
+    // Riempie lo spazio verticale rimasto fino in fondo alla finestra
+    // (non tutta la finestra: title/subtitle sopra occupano la loro
+    // fascia) — misurato dopo l'inserimento, quando la posizione reale è
+    // nota.
+    const top = panel.getBoundingClientRect().top;
+    panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
+
+    draw(); // dopo l'inserimento: serve il layout reale (getBoundingClientRect) per dimensionare la mappa
+    scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
 
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
