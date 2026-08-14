@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.22
+// @version      0.0.23
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.22 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.23 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -576,16 +576,33 @@
 
     placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
       const isActive = pg.nome === activeSpeaker;
+
+      // Struttura in due livelli come lot-poc-3d: "token" è un'ancora a
+      // dimensione zero piazzata esattamente al centro cella; "badge" è
+      // centrato sull'ancora con translate(-50%,-50%) sul proprio riquadro
+      // (icona sola, senza l'etichetta). L'etichetta è assoluta sotto,
+      // quindi NON contribuisce all'altezza centrata — se fosse dentro lo
+      // stesso box centrato (come nella prima versione, un semplice flex
+      // column badge+etichetta), l'etichetta spingerebbe lo stemma sopra
+      // il vero centro della cella invece di lasciarlo lì.
       const token = document.createElement('div');
       token.style.cssText = [
         'position:absolute', `left:${(pos.col + 0.5) * cellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * cellH + (fanY || 0)}px`,
-        'transform:translate(-50%,-50%)', 'display:flex', 'flex-direction:column', 'align-items:center',
-        `z-index:${isActive ? 9999 : (zIndex || 10)}`,
+        'width:0', 'height:0', `z-index:${isActive ? 9999 : (zIndex || 10)}`,
       ].join(';');
 
+      // "badge" è solo il box di posizionamento (nessun overflow:hidden qui,
+      // altrimenti taglierebbe l'etichetta assoluta sotto); "art" dentro è
+      // il riquadro bordato con l'immagine, quello sì con overflow:hidden.
       const badge = document.createElement('div');
       badge.style.cssText = [
-        `width:${iconSize}px`, `height:${iconSize}px`, 'border:2px solid #F8E9AA', 'border-radius:4px',
+        'position:absolute', 'left:0', 'top:0', 'transform:translate(-50%,-50%)',
+        `width:${iconSize}px`, `height:${iconSize}px`,
+      ].join(';');
+
+      const art = document.createElement('div');
+      art.style.cssText = [
+        'position:absolute', 'inset:0', 'border:2px solid #F8E9AA', 'border-radius:4px',
         'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
         'display:flex', 'align-items:center', 'justify-content:center',
       ].join(';');
@@ -593,18 +610,22 @@
         const img = document.createElement('img');
         img.src = pg.censoUrl;
         img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-        badge.appendChild(img);
+        art.appendChild(img);
       } else {
-        badge.textContent = pg.nome.charAt(0).toUpperCase();
-        badge.style.color = '#F8E9AA';
+        art.textContent = pg.nome.charAt(0).toUpperCase();
+        art.style.color = '#F8E9AA';
       }
 
       const label = document.createElement('div');
       label.textContent = pg.nome;
-      label.style.cssText = 'font-size:9px;color:#F8E9AA;text-shadow:0 0 4px #000,0 0 8px #000;margin-top:1px;white-space:nowrap;';
+      label.style.cssText = [
+        'position:absolute', 'top:100%', 'left:50%', 'transform:translateX(-50%)', 'margin-top:1px',
+        'font-size:9px', 'color:#F8E9AA', 'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
+      ].join(';');
 
+      badge.appendChild(art);
+      badge.appendChild(label);
       token.appendChild(badge);
-      token.appendChild(label);
       stage.appendChild(token);
     });
 
