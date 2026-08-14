@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.33
+// @version      0.0.34
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -24,6 +24,12 @@
   // (arriva dopo i fetch, non subito): il banner lo usa come interruttore
   // acceso/spento, quindi deve tollerare il caso "non ancora pronto".
   let scenePanel = null;
+  // Ricalcola altezza pannello + fitScale/pan-zoom quando il banner
+  // riaccende la scena: mentre era nascosta (display:none) il viewport
+  // aveva dimensioni nulle, quindi le misure prese alla creazione sono
+  // ormai stale — senza questo ricalcolo la mappa restava disallineata
+  // (dimensione/posizione sbagliate) finché non si ricaricava la pagina.
+  let refreshSceneLayout = null;
 
   const banner = document.createElement('div');
   banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
@@ -44,6 +50,10 @@
     if (originalChat) originalChat.style.display = willShow ? 'none' : '';
     const footer = document.querySelector('.lot-footer');
     if (footer) footer.style.display = willShow ? 'none' : '';
+    // Il viewport aveva dimensioni nulle mentre era display:none: le
+    // misure vanno rifatte ora che è di nuovo visibile, altrimenti la
+    // mappa resta disallineata/rimpicciolita rispetto a quanto dovrebbe.
+    if (willShow && refreshSceneLayout) refreshSceneLayout();
   });
 
   const mount = document.body || document.documentElement;
@@ -1319,17 +1329,19 @@
 
     // Riempie lo spazio verticale rimasto fino in fondo alla finestra
     // (non tutta la finestra: title/subtitle sopra occupano la loro
-    // fascia) — misurato dopo l'inserimento, quando la posizione reale è
-    // nota.
-    const top = panel.getBoundingClientRect().top;
-    panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
-
-    // Dopo l'inserimento: serve il layout reale (getBoundingClientRect) per
-    // calcolare fitScale e la geometria del righello.
-    updateFitScale();
-    applyView();
+    // fascia), poi ricalcola fitScale/righello sul layout reale appena
+    // misurato — richiamata sia ora sia ogni volta che il banner riaccende
+    // la scena (vedi refreshSceneLayout più sopra).
+    function layoutPanel() {
+      const top = panel.getBoundingClientRect().top;
+      panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
+      updateFitScale();
+      applyView();
+    }
+    layoutPanel();
     draw();
     scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
+    refreshSceneLayout = layoutPanel;
 
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
