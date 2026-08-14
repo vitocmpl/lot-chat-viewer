@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.10
+// @version      0.0.11
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.10 — risoluzione PG)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.11 — ritratto + indossati/con sé)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -73,6 +73,11 @@
     });
 
     const censoImg = doc.querySelector('img[src*="/stemmi/"]');
+    // Ritratto scelto dal giocatore (zoomabile nella modale del POC): è la
+    // prima immagine della pagina, dentro la cella con lo sfondo a
+    // cornice — spesso ospitata su un dominio esterno (altervista, ecc.),
+    // innocuo perché la usiamo solo come src di <img>, non con fetch().
+    const ritrattoImg = doc.querySelector('td[background*="cornice400"] img');
 
     return {
       nome: campi['Nome'] || null,
@@ -89,23 +94,45 @@
       gilda: campi['Gilda'] || null,
       clan: campi['Clan'] || null,
       censoUrl: censoImg ? abs(censoImg.getAttribute('src'), baseUrl) : null,
+      ritrattoUrl: ritrattoImg ? abs(ritrattoImg.getAttribute('src'), baseUrl) : null,
     };
+  }
+
+  // Le "item-box" (icona + nome) sono lo stesso markup usato per gli
+  // oggetti indossati/con sé, dentro .panel-indossati / .panel-conse.
+  function parseItemBoxes(container, baseUrl) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('.item-box')).map((box) => {
+      const img = box.querySelector('img');
+      const nameEl = box.querySelector('.item-name');
+      return {
+        nome: nameEl ? nameEl.textContent.trim() : (img ? img.getAttribute('alt') : null),
+        immagine: img ? abs(img.getAttribute('src'), baseUrl) : null,
+      };
+    });
   }
 
   // --- Parser: pagina aspetto/modellino (proc/ARMInew26.asp?ID=...) ---
   // I layer del modellino sono, in ordine di apparizione nel DOM (che
   // coincide con l'ordine z-index reale): sfondo, piedi, corpo base,
-  // vestito, eventuali accessori. La tabella armi ha 12 slot fissi
+  // vestito, eventuali accessori. Sfondo e piedi non servono per la
+  // scena (sono decorativi della card aspetto, non parte del PG) — si
+  // tiene solo da /figures/razze/ in poi. La cornice della card non
+  // serve nemmeno lei, stesso motivo. La tabella armi ha 12 slot fissi
   // (label in td.slot-header, immagine+nome in td.slot-img successivo).
   function parseAspetto(html, baseUrl) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    const layers = Array.from(doc.querySelectorAll('.avatar-inner img'))
+    const allLayers = Array.from(doc.querySelectorAll('.avatar-inner img'))
       .map((img) => abs(img.getAttribute('src'), baseUrl));
-    const cornice = doc.querySelector('.container img[src*="cornice"]');
+    const razzaIdx = allLayers.findIndex((l) => l.includes('/figures/razze/'));
+    const layers = razzaIdx >= 0 ? allLayers.slice(razzaIdx) : allLayers;
+
     const descFisica = doc.querySelector('.scroll-desc');
     const razzaLabel = doc.querySelector('.scroll-razza');
     const descArmi = doc.querySelector('.armi-desc-box');
+    const indossati = parseItemBoxes(doc.querySelector('.panel-indossati'), baseUrl);
+    const conSe = parseItemBoxes(doc.querySelector('.panel-conse'), baseUrl);
 
     const armi = [];
     doc.querySelectorAll('td.slot-header').forEach((header) => {
@@ -134,9 +161,10 @@
       razza: razzaLabel ? razzaLabel.textContent.trim() : null,
       descrizioneFisica: descFisica ? descFisica.textContent.trim() : null,
       layers,
-      cornice: cornice ? abs(cornice.getAttribute('src'), baseUrl) : null,
       armi: armi.filter((a) => a.nome), // scarta gli slot vuoti (senza TITLE)
       descrizioneArmi: descArmi ? descArmi.textContent.replace(/\s+/g, ' ').trim() : null,
+      indossati,
+      conSe,
     };
   }
 
@@ -313,6 +341,7 @@
       razza: cd.razza || fetched.scheda.razza,
       sesso: cd.sesso || fetched.scheda.sesso,
       censoUrl: cd.censoUrl || fetched.scheda.censoUrl,
+      ritrattoUrl: fetched.scheda.ritrattoUrl,
       forza: fetched.scheda.forza,
       mente: fetched.scheda.mente,
       destrezza: fetched.scheda.destrezza,
