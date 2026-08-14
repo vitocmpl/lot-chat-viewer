@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.27
+// @version      0.0.28
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.27 — lista messaggi)';
+  banner.textContent = 'lot-chat-viewer (v0.0.28 — fumetti + tag modali)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -230,6 +230,35 @@
       && /\d{2}:\d{2}/.test(node.textContent);
   }
 
+  // Ordine di visualizzazione dei tag modali, identico al client reale.
+  const TAG_KIND_ORDER = { F: 0, M: 1, L: 2, S: 3, A: 4, P: 5 };
+
+  // Spezza una stringa reale nelle sue "pagine" alternate: azione (dentro
+  // «» <> () {} []) e parlato/narrazione (il resto), nell'ordine in cui
+  // compaiono nel testo. I tag [...] di metadato (coordinate/tag modali)
+  // sono già stati rimossi dal parser della chat prima di questa funzione,
+  // quindi qui [...] intercetta solo eventuali parentesi quadre rimaste
+  // dentro al corpo del testo stesso.
+  function splitSegments(text) {
+    const re = /«[^»]*»|<[^>]*>|\([^)]*\)|\{[^}]*\}|\[[^\]]*\]/g;
+    const pages = [];
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) {
+        const plain = text.slice(last, m.index).trim();
+        if (plain) pages.push({ type: 'speech', content: plain });
+      }
+      const inner = m[0].slice(1, -1).trim();
+      if (inner) pages.push({ type: 'action', content: inner });
+      last = re.lastIndex;
+    }
+    if (last < text.length) {
+      const tail = text.slice(last).trim();
+      if (tail) pages.push({ type: 'speech', content: tail });
+    }
+    return pages.length ? pages : [{ type: 'speech', content: text.trim() }];
+  }
+
   function speakerFromBlock(wrap) {
     const avatarLink = wrap.querySelector('a[href*="avatar.asp?id="]');
     if (!avatarLink) return null;
@@ -257,10 +286,27 @@
     const labelSpan = wrap.querySelector('span.msg-tag-pos');
     const posLabel = labelSpan ? decodeEntitiesOnce(labelSpan.textContent).replace(/[[\]]/g, '').trim() : null;
 
+    // Tag modali (POSIZIONE/STATUS/ARCANI/PNG/FATO/MISSIONE), stessa
+    // classe CSS del client reale — msg-pos-tag è un'altra cosa (la
+    // coordinata di griglia [G4], già presa sopra come coordRaw, non un
+    // tag modale). Ordine di visualizzazione fisso, come nel client reale.
+    const tags = [];
+    if (posLabel) tags.push({ kind: 'L', label: posLabel });
+    [['S', 'msg-tag-status'], ['A', 'msg-tag-arcani'], ['P', 'msg-tag-png'], ['F', 'msg-tag-fato'], ['M', 'msg-tag-missione']]
+      .forEach(([kind, cls]) => {
+        wrap.querySelectorAll('span.' + cls).forEach((el) => {
+          const label = decodeEntitiesOnce(el.textContent).replace(/[[\]]/g, '').trim();
+          if (label) tags.push({ kind, label });
+        });
+      });
+    tags.sort((a, b) => TAG_KIND_ORDER[a.kind] - TAG_KIND_ORDER[b.kind]);
+
     // Testo: tutto il blocco meno timestamp/link-avatar/immagini/tag,
     // poi si toglie l'eventuale prefisso "Nome  " o "Nome  - " quando il
     // nome è incollato dentro il testo invece di essere un nodo a parte.
-    wrap.querySelectorAll('span.msg-pos-tag, span.msg-tag-pos, img, a[href*="avatar.asp"]').forEach((el) => el.remove());
+    wrap.querySelectorAll(
+      'span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, img, a[href*="avatar.asp"]'
+    ).forEach((el) => el.remove());
     wrap.querySelectorAll('font[color="#606060"]').forEach((el) => el.remove());
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     if (speaker && testo.startsWith(speaker)) {
@@ -269,7 +315,7 @@
 
     if (!time || !speaker) return null; // blocco non riconosciuto (es. separatori/note di sistema)
 
-    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, testo };
+    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, tags, testo };
   }
 
   function parseChatSalvata(doc) {
@@ -770,6 +816,58 @@
     // questo momento della timeline) — il testo resta grezzo per ora, la
     // suddivisione in fumetti «azione»/parlato (splitSegments nel POC) è
     // il prossimo step separato.
+    // Stessa coppia colore/sfondo del client reale in dark mode per
+    // ciascuna categoria di tag modale.
+    const TAG_COLORS = {
+      L: { color: '#f0f0f0', background: '#666666' },
+      S: { color: '#d0e8ff', background: '#2a4a7c' },
+      A: { color: '#e0d0ff', background: '#4a2a7c' },
+      P: { color: '#c0f0c0', background: '#2a5530' },
+      F: { color: '#f0d0e0', background: '#802050' },
+      M: { color: '#ffd0d0', background: '#cc3333' },
+    };
+
+    // '+' (azione): il messaggio intero è azione, un unico blocco
+    // grassetto — mai spezzato in fumetti separati come i normali. Le <>
+    // interne restano solo in corsivo (non cambiano contenitore): coprono
+    // anche le descrizioni automatiche d'ingresso/equipaggiamento.
+    function buildAzioneBlock(text) {
+      const azione = document.createElement('div');
+      azione.style.cssText = 'font-weight:800;font-size:12.5px;line-height:1.5;';
+      splitSegments(text).forEach((p, i) => {
+        if (i > 0) azione.appendChild(document.createTextNode(' '));
+        const span = document.createElement('span');
+        if (p.type === 'action') span.style.fontStyle = 'italic';
+        span.textContent = p.content;
+        azione.appendChild(span);
+      });
+      return azione;
+    }
+
+    // Messaggi normali: segmenti «azione»/parlato impilati in verticale,
+    // ognuno nel proprio fumetto (bordo tondo per il parlato, squadrato +
+    // corsivo per l'azione), leggero rientro laterale per distinguerli
+    // anche quando due dello stesso tipo si susseguono.
+    function buildSpeechBubbles(text) {
+      const bubbles = document.createElement('div');
+      const slots = splitSegments(text).map((p) => {
+        const slot = document.createElement('div');
+        slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`,
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
+          p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
+        ].join(';');
+        bubble.textContent = p.content;
+        slot.appendChild(bubble);
+        bubbles.appendChild(slot);
+        return slot;
+      });
+      if (slots.length) slots[slots.length - 1].style.marginBottom = '0';
+      return bubbles;
+    }
+
     function buildExpandedCard(pg, msg, activePos) {
       const card = document.createElement('div');
       card.style.cssText = [
@@ -801,6 +899,22 @@
         header.appendChild(raceIcon);
       }
 
+      // Tag modali prima della coordinata di griglia: stesso ordine del
+      // client reale (i tag modali precedono sempre la coordinata mappa
+      // nel testo composto).
+      (msg.tags || []).forEach((tag) => {
+        const colors = TAG_COLORS[tag.kind] || TAG_COLORS.L;
+        const tagEl = document.createElement('div');
+        tagEl.textContent = tag.label;
+        tagEl.title = tag.label;
+        tagEl.style.cssText = [
+          'font-size:11px', 'font-weight:700', 'border-radius:6px', 'padding:2px 8px',
+          'max-width:130px', 'overflow:hidden', 'text-overflow:ellipsis', 'white-space:nowrap',
+          `color:${colors.color}`, `background:${colors.background}`,
+        ].join(';');
+        header.appendChild(tagEl);
+      });
+
       if (activePos) {
         const coord = document.createElement('div');
         coord.textContent = colLetter(activePos.col) + (activePos.row + 1);
@@ -823,10 +937,13 @@
         card.appendChild(gapNote);
       }
 
-      const body = document.createElement('div');
-      body.textContent = msg.testo;
-      body.style.cssText = 'font-size:12.5px;line-height:1.5;';
-      card.appendChild(body);
+      // tipo '+' (azione/arrivo): il testo esportato dalla chat porta
+      // ancora il prefisso letterale "+ " (non un campo tipo separato
+      // come nel vecchio formato export) — va tolto prima di passare il
+      // testo pulito al blocco azione.
+      const isAzione = /^\+\s/.test(msg.testo);
+      const bodyText = isAzione ? msg.testo.replace(/^\+\s*/, '') : msg.testo;
+      card.appendChild(isAzione ? buildAzioneBlock(bodyText) : buildSpeechBubbles(bodyText));
 
       return card;
     }
@@ -854,7 +971,7 @@
       nm.textContent = pg.nome;
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
       const pv = document.createElement('div');
-      pv.textContent = msg.testo;
+      pv.textContent = splitSegments(msg.testo.replace(/^\+\s*/, '')).map((p) => p.content).join(' ');
       pv.style.cssText = `font-size:10.5px;color:${COLOR_TEXT_DIM};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
