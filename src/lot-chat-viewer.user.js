@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.31
+// @version      0.0.32
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.31 — tag MEDICO predisposto)';
+  banner.textContent = 'lot-chat-viewer (v0.0.32 — fix dimensione token + footer)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -38,9 +38,12 @@
     const willShow = scenePanel.style.display === 'none';
     scenePanel.style.display = willShow ? '' : 'none';
     // Acceso: nasconde il testo grezzo della chat sotto (sostituito dalla
-    // scena). Spento: lo rimostra, nascondendo solo la scena.
+    // scena) e il footer della pagina. Spento: li rimostra entrambi,
+    // nascondendo solo la scena.
     const originalChat = document.querySelector('.lot-chat');
     if (originalChat) originalChat.style.display = willShow ? 'none' : '';
+    const footer = document.querySelector('.lot-footer');
+    if (footer) footer.style.display = willShow ? 'none' : '';
   });
 
   const mount = document.body || document.documentElement;
@@ -602,7 +605,15 @@
     const dispH = Math.floor(mappa.mapHeight * ratio);
     const cellW = dispW / mappa.cols;
     const cellH = dispH / mappa.rows;
-    const iconSize = Math.min(cellW, cellH) * 0.75;
+    // La dimensione del token è contro-scalata rispetto al rimpicciolimento
+    // della mappa (--token-icon-scale = 1/fitScale nel POC): il badge
+    // resta sempre al 75% della cella "nativa" (dimensione reale
+    // dell'immagine), non di quella già ridotta per stare nel riquadro —
+    // altrimenti più la mappa si rimpicciolisce più il token risulterebbe
+    // piccolo, difforme da come si vede nel POC.
+    const nativeCellW = mappa.mapWidth / mappa.cols;
+    const nativeCellH = mappa.mapHeight / mappa.rows;
+    const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
 
     const stage = document.createElement('div');
     stage.style.cssText = `position:relative;width:${dispW}px;height:${dispH}px;overflow:hidden;border-radius:4px;`;
@@ -1037,6 +1048,8 @@
     // visibile) spingerebbe il pannello più in basso di dove deve stare.
     const originalChat = document.querySelector('.lot-chat');
     if (originalChat) originalChat.style.display = 'none';
+    const footer = document.querySelector('.lot-footer');
+    if (footer) footer.style.display = 'none';
 
     if (originalChat && originalChat.parentNode) {
       originalChat.parentNode.insertBefore(panel, originalChat.nextSibling);
