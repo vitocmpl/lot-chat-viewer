@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.24
+// @version      0.0.25
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.24 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.25 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -492,9 +492,7 @@
   // lo ricostruiscono da zero sul sottoinsieme di messaggi fino all'indice
   // corrente, invece di aggiornare incrementalmente come lot-poc-3d: più
   // semplice per un primo passo, stesso risultato visivo).
-  function buildStageElement(messages, pgRecords, mappa) {
-    const maxW = Math.min(window.innerWidth * 0.55, 700);
-    const maxH = Math.min(window.innerHeight * 0.8, 700);
+  function buildStageElement(messages, pgRecords, mappa, maxW, maxH) {
     const ratio = Math.min(maxW / mappa.mapWidth, maxH / mappa.mapHeight, 1);
     const dispW = Math.floor(mappa.mapWidth * ratio);
     const dispH = Math.floor(mappa.mapHeight * ratio);
@@ -649,57 +647,85 @@
 
     let index = 0; // parte dal primo messaggio della chat
 
+    // Layout a schermo intero, due colonne (mappa | timeline), stessi
+    // colori/spaziature/bordi di lot-poc-3d (variabili :root del POC,
+    // .stage-frame + .sidebar) — senza la toolbar in alto: qui la chat è
+    // già quella aperta nella pagina, non c'è nulla da selezionare.
+    const COLOR_BG = '#120f0c';
+    const COLOR_SURFACE = '#1c1610';
+    const COLOR_LINE = '#3a2c1e';
+    const COLOR_TEXT = '#ece3d6';
+    const COLOR_TEXT_DIM = '#a89a89';
+
     const panel = document.createElement('div');
     panel.id = 'lot-chat-viewer-scene';
     panel.style.cssText = [
-      'position:fixed', 'top:56px', 'right:8px', 'z-index:2147483646',
-      'background:#111', 'border:1px solid #444', 'border-radius:6px',
-      'padding:8px', 'box-shadow:0 4px 16px rgba(0,0,0,.5)',
-      'font-family:Verdana,Arial', 'color:#eee',
+      'position:fixed', 'inset:0', 'z-index:2147483646', 'box-sizing:border-box',
+      `background:${COLOR_BG}`, `color:${COLOR_TEXT}`,
+      'font-family:-apple-system,"Segoe UI",system-ui,sans-serif',
+      'padding:14px', 'display:flex', 'overflow:hidden',
     ].join(';');
 
-    // Niente titolo qui: .lot-title/.lot-subtitle della pagina originale
-    // restano visibili sopra (nascondiamo solo .lot-chat, il testo dei
-    // messaggi) e mostrano già luogo e data — duplicarli qui era ridondante.
+    const stageFrame = document.createElement('div');
+    stageFrame.style.cssText = [
+      'flex:1', 'min-width:0', 'min-height:0', 'display:flex', 'align-items:stretch', 'gap:12px',
+      `background:${COLOR_SURFACE}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:14px', 'padding:12px',
+    ].join(';');
+    panel.appendChild(stageFrame);
+
+    const stageWrap = document.createElement('div');
+    stageWrap.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;';
     const stageSlot = document.createElement('div');
-    panel.appendChild(stageSlot);
+    stageWrap.appendChild(stageSlot);
+    stageFrame.appendChild(stageWrap);
+
+    const sidebar = document.createElement('div');
+    sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
+    stageFrame.appendChild(sidebar);
 
     const msgBox = document.createElement('div');
     msgBox.style.cssText = [
-      'margin-top:6px', 'padding:6px 8px', 'background:rgba(255,255,255,0.06)',
-      'border-radius:4px', 'max-width:700px', 'box-sizing:border-box',
+      'flex:1', 'min-height:0', 'overflow-y:auto', 'padding:10px 12px',
+      `background:${COLOR_BG}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'box-sizing:border-box',
     ].join(';');
-    panel.appendChild(msgBox);
+    sidebar.appendChild(msgBox);
 
     const controls = document.createElement('div');
-    controls.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px;';
+    controls.style.cssText = [
+      'flex:0 0 auto', 'display:flex', 'align-items:center', 'justify-content:center', 'gap:10px',
+      `background:${COLOR_SURFACE}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'padding:8px',
+    ].join(';');
     const prevBtn = document.createElement('button');
     prevBtn.textContent = '◀';
     const counter = document.createElement('span');
-    counter.style.cssText = 'font-size:11px;';
+    counter.style.cssText = `font-size:11.5px;font-family:ui-monospace,Consolas,monospace;color:${COLOR_TEXT_DIM};`;
     const nextBtn = document.createElement('button');
     nextBtn.textContent = '▶';
     [prevBtn, nextBtn].forEach((btn) => {
-      btn.style.cssText = 'font-family:Verdana;cursor:pointer;padding:2px 10px;';
+      btn.style.cssText = [
+        'appearance:none', `border:1px solid ${COLOR_LINE}`, `background:${COLOR_BG}`, 'color:#d9803f',
+        'width:28px', 'height:28px', 'border-radius:50%', 'cursor:pointer', 'font-size:13px',
+      ].join(';');
     });
     controls.appendChild(prevBtn);
     controls.appendChild(counter);
     controls.appendChild(nextBtn);
-    panel.appendChild(controls);
+    sidebar.appendChild(controls);
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
+      const rect = stageWrap.getBoundingClientRect();
       stageSlot.innerHTML = '';
-      stageSlot.appendChild(buildStageElement(messages, pgRecords, mappa));
+      stageSlot.appendChild(buildStageElement(messages, pgRecords, mappa, rect.width, rect.height));
 
       const current = chatParsed.messages[index];
       msgBox.innerHTML = '';
       const head = document.createElement('div');
       head.textContent = current.time + ' — ' + current.speaker + (current.posLabel ? ' (' + current.posLabel + ')' : '');
-      head.style.cssText = 'font-weight:bold;font-size:11px;color:#F8E9AA;margin-bottom:3px;';
+      head.style.cssText = 'font-weight:bold;font-size:12px;color:#F8E9AA;margin-bottom:5px;';
       const body = document.createElement('div');
       body.textContent = current.testo;
-      body.style.cssText = 'font-size:11px;max-height:90px;overflow-y:auto;line-height:1.4;';
+      body.style.cssText = 'font-size:12px;line-height:1.5;';
       msgBox.appendChild(head);
       msgBox.appendChild(body);
 
@@ -711,8 +737,8 @@
     prevBtn.addEventListener('click', () => { if (index > 0) { index -= 1; draw(); } });
     nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) { index += 1; draw(); } });
 
-    draw();
     document.body.appendChild(panel);
+    draw(); // dopo l'append: serve il layout reale (getBoundingClientRect) per dimensionare la mappa
     scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
 
     // La scena parte visibile: nasconde subito il testo grezzo sotto,
