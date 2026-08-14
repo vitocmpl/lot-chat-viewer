@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.21
+// @version      0.0.22
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.21 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.22 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -637,11 +637,9 @@
       'font-family:Verdana,Arial', 'color:#eee',
     ].join(';');
 
-    const title = document.createElement('div');
-    title.textContent = [chatParsed.locationName, chatParsed.dateLabel].filter(Boolean).join(' — ');
-    title.style.cssText = 'font-size:12px;font-weight:bold;margin-bottom:6px;text-align:center;';
-    panel.appendChild(title);
-
+    // Niente titolo qui: .lot-title/.lot-subtitle della pagina originale
+    // restano visibili sopra (nascondiamo solo .lot-chat, il testo dei
+    // messaggi) e mostrano già luogo e data — duplicarli qui era ridondante.
     const stageSlot = document.createElement('div');
     panel.appendChild(stageSlot);
 
