@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.25
+// @version      0.0.26
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.25 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.26 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -683,24 +683,35 @@
     sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
     stageFrame.appendChild(sidebar);
 
-    const msgBox = document.createElement('div');
-    msgBox.style.cssText = [
-      'flex:1', 'min-height:0', 'overflow-y:auto', 'padding:10px 12px',
-      `background:${COLOR_BG}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'box-sizing:border-box',
+    // Header fisso in cima (non scrolla) — stato "N PG in scena · M battute
+    // caricate" a sinistra, navigazione ◀ N di M · orario ▶ a destra,
+    // stessa posizione/contenuto di .sidebar-header nel POC (lì sopra la
+    // lista messaggi, qui sopra il riquadro del messaggio corrente).
+    const sidebarHeader = document.createElement('div');
+    sidebarHeader.style.cssText = [
+      'flex:0 0 auto', 'display:flex', 'flex-direction:row', 'align-items:center',
+      'justify-content:space-between', 'gap:10px', 'padding-bottom:10px', `border-bottom:1px solid ${COLOR_LINE}`,
     ].join(';');
-    sidebar.appendChild(msgBox);
+    sidebar.appendChild(sidebarHeader);
+
+    const loadStatus = document.createElement('span');
+    loadStatus.style.cssText = [
+      `font-size:11px`, `color:${COLOR_TEXT_DIM}`, 'font-style:italic',
+      'min-width:0', 'overflow:hidden', 'text-overflow:ellipsis', 'white-space:nowrap',
+    ].join(';');
+    loadStatus.textContent = pgRecords.length + ' PG in scena · ' + chatParsed.messages.length + ' battute caricate';
+    sidebarHeader.appendChild(loadStatus);
 
     const controls = document.createElement('div');
-    controls.style.cssText = [
-      'flex:0 0 auto', 'display:flex', 'align-items:center', 'justify-content:center', 'gap:10px',
-      `background:${COLOR_SURFACE}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'padding:8px',
-    ].join(';');
+    controls.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:10px;';
     const prevBtn = document.createElement('button');
     prevBtn.textContent = '◀';
+    prevBtn.title = 'Messaggio precedente';
     const counter = document.createElement('span');
     counter.style.cssText = `font-size:11.5px;font-family:ui-monospace,Consolas,monospace;color:${COLOR_TEXT_DIM};`;
     const nextBtn = document.createElement('button');
     nextBtn.textContent = '▶';
+    nextBtn.title = 'Messaggio successivo';
     [prevBtn, nextBtn].forEach((btn) => {
       btn.style.cssText = [
         'appearance:none', `border:1px solid ${COLOR_LINE}`, `background:${COLOR_BG}`, 'color:#d9803f',
@@ -710,7 +721,14 @@
     controls.appendChild(prevBtn);
     controls.appendChild(counter);
     controls.appendChild(nextBtn);
-    sidebar.appendChild(controls);
+    sidebarHeader.appendChild(controls);
+
+    const msgBox = document.createElement('div');
+    msgBox.style.cssText = [
+      'flex:1', 'min-height:0', 'overflow-y:auto', 'padding:10px 12px',
+      `background:${COLOR_BG}`, `border:1px solid ${COLOR_LINE}`, 'border-radius:10px', 'box-sizing:border-box',
+    ].join(';');
+    sidebar.appendChild(msgBox);
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
@@ -729,7 +747,7 @@
       msgBox.appendChild(head);
       msgBox.appendChild(body);
 
-      counter.textContent = (index + 1) + ' / ' + chatParsed.messages.length;
+      counter.textContent = (index + 1) + ' di ' + chatParsed.messages.length + ' · ' + current.time;
       prevBtn.disabled = index <= 0;
       nextBtn.disabled = index >= chatParsed.messages.length - 1;
     }
