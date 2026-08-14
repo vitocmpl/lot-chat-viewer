@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.39
+// @version      0.0.40
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -42,6 +42,13 @@
   // pgRecords/mappa restano gli stessi, assegnata una volta risolti.
   let sceneVisible = true;
   let rebuildScene = null;
+  // Aggiornata da renderTimeline ad ogni ricostruzione — un solo listener
+  // Esc a livello di documento (sotto), non uno nuovo ogni volta che il
+  // toggle mostra/nascondi ricrea la scena.
+  let closeAllModals = () => {};
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllModals();
+  });
 
   const banner = document.createElement('div');
   banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
@@ -780,6 +787,16 @@
     function closeEquipModal() {
       equipShell.overlay.style.display = 'none';
     }
+
+    // Esc chiude qualunque popup/modale sia aperto (listener Esc unico a
+    // livello di IIFE, vedi in cima allo script — qui aggiorniamo solo a
+    // cosa punta, per non accumulare un nuovo document-level listener ad
+    // ogni ricostruzione della scena col toggle mostra/nascondi).
+    closeAllModals = () => {
+      closeAvatarLightbox();
+      closeSchedaPopup();
+      closeEquipModal();
+    };
 
     // Griglia di icone cliccabili — click apre il certificato reale in una
     // nuova scheda, stessa idea di makeNewWindow() nel client.
