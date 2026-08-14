@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.38
+// @version      0.0.39
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -1057,7 +1057,12 @@
       applyView();
     }
     resetViewBtn.addEventListener('click', resetView);
-    window.addEventListener('resize', () => { updateFitScale(); applyView(); });
+    // layoutPanel (definita più sotto, ma le funzioni sono hoisted) rifà
+    // anche altezza/top del pannello, non solo fitScale: senza, ingrandire
+    // la finestra (es. popup chat_salvate portato a schermo intero) non
+    // faceva crescere la mappa, restava vincolata all'altezza calcolata al
+    // primo caricamento quando la finestra era ancora piccola.
+    window.addEventListener('resize', () => { layoutPanel(); });
 
     viewport.addEventListener('wheel', (e) => {
       e.preventDefault();
