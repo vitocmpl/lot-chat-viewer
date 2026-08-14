@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.41
+// @version      0.0.42
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -129,7 +129,7 @@
     });
 
     const censoImg = doc.querySelector('img[src*="/stemmi/"]');
-    // Ritratto scelto dal giocatore (zoomabile nella modale del POC): è la
+    // Ritratto scelto dal giocatore (zoomabile nel popup scheda): è la
     // prima immagine della pagina, dentro la cella con lo sfondo a
     // cornice — spesso ospitata su un dominio esterno (altervista, ecc.),
     // innocuo perché la usiamo solo come src di <img>, non con fetch().
@@ -265,9 +265,9 @@
 
   // Tag MEDICO ({~MED:...} nel client reale, chat_taverne.js): sempre
   // l'ultimo tra i tag modali, un'icona con tooltip nativo invece di un
-  // badge colorato come gli altri sei. URL confermato via scraping live
-  // (usato identico in lot-poc-3d). Nessun esempio di chat_salvate.asp
-  // con un tag MED sotto mano per confermare il nome classe CSS in
+  // badge colorato come gli altri sei. URL confermato via scraping live.
+  // Nessun esempio di chat_salvate.asp con un tag MED sotto mano per
+  // confermare il nome classe CSS in
   // QUESTO renderer (diverso da chat_taverne.asp): si prova sia uno span
   // con lo stesso pattern msg-tag-{kind} degli altri cinque, sia un'img
   // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
@@ -366,9 +366,20 @@
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
     }
 
-    if (!time || !speaker) return null; // blocco non riconosciuto (es. separatori/note di sistema)
+    // Non si scarta mai un blocco con un minimo di contenuto solo perché
+    // non riconosciamo il parlante (es. messaggi di sistema/dado/sussurro/
+    // moderazione — nessun esempio reale sotto mano per sapere come sono
+    // fatti): meglio una card "grezza" in timeline che un buco silenzioso
+    // nella chat per chi la sta testando. Un blocco davvero vuoto (nessun
+    // orario, nessun testo residuo — separatori interni della pagina) resta
+    // scartato.
+    if (!time && !testo) return null;
+    const unsupportedType = !speaker;
 
-    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo };
+    return {
+      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
+      unsupportedType,
+    };
   }
 
   function parseChatSalvata(doc) {
@@ -411,7 +422,12 @@
   const chatParsed = parseChatSalvata(document);
   console.log('[lot-chat-viewer] chat parsata:', chatParsed.locationName, chatParsed.dateLabel,
     '—', chatParsed.messages.length, 'messaggi');
-  const roster = Array.from(new Set(chatParsed.messages.map((m) => m.speaker)));
+  // I messaggi con parlante non riconosciuto (unsupportedType, vedi
+  // parseBlock) restano nella timeline con un'etichetta placeholder, ma
+  // non sono un vero PG: niente fetch scheda/aspetto per loro.
+  const roster = Array.from(new Set(
+    chatParsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+  ));
   console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
   console.log('[lot-chat-viewer] primi 8 messaggi:', JSON.stringify(chatParsed.messages.slice(0, 8), null, 2));
 
@@ -531,10 +547,7 @@
       });
   }
 
-  // --- Rendering: mappa + token compatti (stemma + nome), stessa formula
-  // di ancoraggio cella-centro e stessa dimensione icona già validate in
-  // lot-poc-3d (min(cellW,cellH)*0.75) — qui solo la versione "token
-  // compatto", senza pan/zoom/modellino intero: primo prototipo statico.
+  // --- Rendering: mappa + token, coordinate di griglia -----------------
   function colIndexFromLetters(letters) {
     if (letters.length === 1) return letters.charCodeAt(0) - 65;
     return (letters.charCodeAt(0) - 64) * 26 + (letters.charCodeAt(1) - 65);
@@ -559,13 +572,9 @@
     return pos;
   }
 
-  // Ordine "chi è salito in cima più di recente": ogni volta che un PG
-  // parla, si sposta in fondo all'array (= più recente). Simulato sull'
-  // intera chat fino alla fine, stessa logica di lot-poc-3d (lì costruito
-  // in tempo reale scorrendo la timeline; qui in un colpo solo perché non
-  // abbiamo ancora una timeline — il risultato finale è identico).
   // Colore di identità per PG, derivato dall'hash del nome (nessuna scelta
-  // manuale) — usato solo per il marcatore della cella attiva per ora.
+  // manuale) — usato per il marcatore della cella attiva e per il glow/
+  // freccia del modellino intero.
   function hashInt(str) {
     let h = 0;
     for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
@@ -578,9 +587,9 @@
     return `hsl(${pgHue(nome)} 62% 52%)`;
   }
 
-  // A..Z poi AA, AB... — stessa formula di lot-poc-3d/chat_mappa_quest.asp
-  // (drawLabels), inversa di colIndexFromLetters usata per mostrare la
-  // coordinata corrente nella card espansa.
+  // A..Z poi AA, AB... — stessa formula dello strumento mappa reale di lot
+  // (drawLabels in chat_mappa_quest.asp), inversa di colIndexFromLetters
+  // usata per mostrare la coordinata corrente nella card espansa.
   function colLetter(index) {
     let letter = String.fromCharCode(65 + (index % 26));
     if (index >= 26) letter = String.fromCharCode(65 + Math.floor(index / 26) - 1) + letter;
@@ -610,6 +619,9 @@
     }
   }
 
+  // Ordine "chi è salito in cima più di recente": ogni volta che un PG
+  // parla, si sposta in fondo all'array (= più recente) — usato per
+  // ordinare il ventaglio dei token quando più PG condividono una cella.
   function buildStackOrder(messages) {
     const order = [];
     messages.forEach((m) => {
@@ -638,10 +650,9 @@
 
     let index = 0; // parte dal primo messaggio della chat
 
-    // Layout a schermo intero, due colonne (mappa | timeline), stessi
-    // colori/spaziature/bordi di lot-poc-3d (variabili :root del POC,
-    // .stage-frame + .sidebar) — senza la toolbar in alto: qui la chat è
-    // già quella aperta nella pagina, non c'è nulla da selezionare.
+    // Layout a schermo intero, due colonne (mappa | timeline) — senza una
+    // toolbar di selezione in alto: qui la chat è già quella aperta nella
+    // pagina, non c'è nulla da scegliere.
     const COLOR_BG = '#120f0c';
     const COLOR_SURFACE = '#1c1610';
     const COLOR_SURFACE2 = '#281f16';
@@ -855,9 +866,8 @@
       equipModalBody.appendChild(buildEquipSection('Con sé', conSe, { emptyText: 'Nessun oggetto con sé' }));
       equipModalBody.appendChild(buildEquipSection('Equip bellico', armi, { showEmptySlots: true }));
 
-      // Non presente nel POC (lì non c'era questo dato): il paragrafo
-      // descrittivo di ARMInew26.asp ("Questo quanto si osserva di NOME,
-      // tiene..."), già estratto in parseAspetto ma finora inutilizzato.
+      // Paragrafo descrittivo di ARMInew26.asp ("Questo quanto si osserva
+      // di NOME, tiene..."), già estratto in parseAspetto.
       const descrizioneArmi = pg.aspetto && pg.aspetto.descrizioneArmi;
       if (descrizioneArmi) {
         const descSection = document.createElement('div');
@@ -877,14 +887,13 @@
       equipShell.overlay.style.display = 'flex';
     }
 
-    // ---------- viewport mappa: pan/zoom quadrato come nel POC ----------
-    // .stage-viewport-wrap (centra) > .stage-viewport (quadrato, pannabile/
-    // zoomabile) > .stage-zoom (transform pan+scale) > .stage-plane
-    // (dimensione nativa mappa+margine) > .map-inner (mappa/griglia/token,
-    // tutto in coordinate NATIVE — è il transform CSS sull'antenato a
-    // adattarlo al riquadro, non un ridimensionamento a monte come nella
-    // prima versione statica). Costruito UNA VOLTA (non ad ogni draw()):
-    // solo tokenLayer/activeCell vengono aggiornati passo per passo.
+    // ---------- viewport mappa: pan/zoom in un riquadro quadrato --------
+    // wrapper (centra) > viewport (quadrato, pannabile/zoomabile) > zoom
+    // (transform pan+scale) > plane (dimensione nativa mappa+margine) >
+    // inner (mappa/griglia/token, tutto in coordinate NATIVE — è il
+    // transform CSS sull'antenato ad adattarlo al riquadro). Costruito UNA
+    // VOLTA (non ad ogni draw()): solo tokenLayer/activeCell vengono
+    // aggiornati passo per passo.
     const LABEL_MARGIN_LEFT = 18, LABEL_MARGIN_TOP = 16;
     const ZOOM_MIN = 0.5;
     // "una cella = tutta la mappa" deve restare raggiungibile: il max si
@@ -946,10 +955,10 @@
       for (let c = 0; c < mappa.cols; c++) {
         const cell = document.createElement('div');
         // box-sizing:border-box su tutto ciò che ha bordo + dimensione
-        // esplicita: il POC ha un reset globale (*{box-sizing:border-box}),
-        // senza il bordo si sommerebbe alla larghezza dichiarata e l'errore
-        // si accumulerebbe colonna dopo colonna, disallineando la griglia
-        // dall'immagine mappa (che invece non ha bordi propri).
+        // esplicita: senza, il bordo si sommerebbe alla larghezza
+        // dichiarata e l'errore si accumulerebbe colonna dopo colonna,
+        // disallineando la griglia dall'immagine mappa (che invece non ha
+        // bordi propri).
         cell.style.cssText = [
           'position:absolute', 'box-sizing:border-box', `left:${c * nativeCellW}px`, `top:${r * nativeCellH}px`,
           `width:${nativeCellW}px`, `height:${nativeCellH}px`,
@@ -1060,9 +1069,8 @@
       stageZoom.style.transform = `translate(${view.panX}px,${view.panY}px) scale(${scale})`;
       zoomReadout.textContent = Math.round(view.zoom * 100) + '%';
       // Contro-scala il token compatto (75% della cella nativa) rispetto al
-      // solo fitScale, non allo zoom interattivo — stesso principio del
-      // POC (--token-icon-scale/--icon-label-scale): a zoom 100% badge e
-      // nome rendono alla dimensione "vera" indipendentemente da quanto la
+      // solo fitScale, non allo zoom interattivo: a zoom 100% badge e nome
+      // rendono alla dimensione "vera" indipendentemente da quanto la
       // mappa si è dovuta rimpicciolire per stare nel riquadro quadrato.
       tokenLayer.style.setProperty('--token-icon-scale', fitScale ? (1 / fitScale) : 1);
       tokenLayer.style.setProperty('--icon-label-scale', fitScale ? (1 / fitScale) : 1);
@@ -1075,10 +1083,10 @@
 
       // Sotto la soglia: token compatto stile stemma. Sopra: modellino
       // intero a layer. Il cambio di modalità richiede di ricostruire i
-      // token (le due rese sono strutturalmente diverse, non solo un
-      // display:none/flex come nel POC, che invece le tiene entrambe
-      // sempre nel DOM) — ma solo quando si attraversa davvero la soglia,
-      // non ad ogni tick di zoom.
+      // token (le due rese sono strutturalmente diverse: qui non teniamo
+      // entrambe sempre nel DOM con un semplice display:none/flex) — ma
+      // solo quando si attraversa davvero la soglia, non ad ogni tick di
+      // zoom.
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       if (compact !== lastCompact) {
         lastCompact = compact;
@@ -1184,14 +1192,11 @@
 
     // Aggiorna SOLO token/cella attiva sul sottoinsieme di messaggi fino
     // all'indice corrente — la struttura mappa/griglia/righello sopra
-    // resta la stessa per tutta la sessione di replay, come nel POC
-    // (buildRosterDom una volta sola, poi solo placeTokenDom/refreshStacks
-    // per ogni passo di timeline).
+    // resta la stessa per tutta la sessione di replay, costruita una sola
+    // volta all'apertura della chat.
     // Pan automatico verso il PG attivo, se non è già lì — anima invece di
-    // scattare di colpo. Solo token compatto qui (nessun modellino intero
-    // ancora): è già centrato per intero sulla cella, nessun aggiustamento
-    // extra di offset verticale necessario (il POC lo aggiunge solo per il
-    // modellino intero, dove i piedi sono ancorati al fondo della cella).
+    // scattare di colpo (vedi anche l'offset verticale extra per il
+    // modellino intero dentro centerOnActiveToken più sotto).
     let panAnimId = null;
     function animatePanTo(targetPanX, targetPanY, duration) {
       if (panAnimId) cancelAnimationFrame(panAnimId);
@@ -1444,7 +1449,7 @@
 
         // "frame" fa l'ancoraggio: -50% orizzontale sempre (centrato sulla
         // cella), verticale dipende dalla modalità — -50% per il token
-        // compatto (icona centrata per intero, come nel POC), -100% per il
+        // compatto (icona centrata per intero), -100% per il
         // modellino intero (piedi ancorati al centro cella, il corpo sale
         // sopra). La percentuale si risolve sull'altezza reale del
         // contenuto (icona o sprite), qualunque essa sia. pointer-events
@@ -1486,10 +1491,9 @@
     sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
     stageFrame.appendChild(sidebar);
 
-    // Header fisso in cima (non scrolla) — stato "N PG in scena · M battute
-    // caricate" a sinistra, navigazione ◀ N di M · orario ▶ a destra,
-    // stessa posizione/contenuto di .sidebar-header nel POC (lì sopra la
-    // lista messaggi, qui sopra il riquadro del messaggio corrente).
+    // Header fisso in cima (non scrolla con la lista sotto) — stato "N PG
+    // in scena · M battute caricate" a sinistra, navigazione ◀ N di M ·
+    // orario ▶ a destra.
     const sidebarHeader = document.createElement('div');
     sidebarHeader.style.cssText = [
       'flex:0 0 auto', 'display:flex', 'flex-direction:row', 'align-items:center',
@@ -1531,9 +1535,7 @@
     sidebar.appendChild(sidebarList);
 
     // Card espansa del messaggio attivo (quello mostrato sulla mappa in
-    // questo momento della timeline) — il testo resta grezzo per ora, la
-    // suddivisione in fumetti «azione»/parlato (splitSegments nel POC) è
-    // il prossimo step separato.
+    // questo momento della timeline).
     // Stessa coppia colore/sfondo del client reale in dark mode per
     // ciascuna categoria di tag modale.
     const TAG_COLORS = {
@@ -1648,6 +1650,12 @@
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
         card.appendChild(gapNote);
       }
+      if (msg.unsupportedType) {
+        const typeNote = document.createElement('div');
+        typeNote.textContent = 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
+        typeNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
+        card.appendChild(typeNote);
+      }
 
       card.appendChild(buildSpeechBubbles(msg.testo));
 
@@ -1698,13 +1706,17 @@
 
       // Posizioni note "fino ad ora" nella timeline (stesso sottoinsieme
       // usato per la mappa): solo la card espansa mostra la coordinata,
-      // le righe compatte no — stessa scelta del POC.
+      // le righe compatte no.
       const positionsNow = lastKnownPositions(messages);
 
       sidebarList.innerHTML = '';
       chatParsed.messages.forEach((msg, i) => {
-        const pg = pgRecords.find((p) => p.nome === msg.speaker);
-        if (!pg) return;
+        // Placeholder minimo se il parlante non è un PG risolto (tipo
+        // messaggio non riconosciuto, o un fetch scheda/aspetto fallito):
+        // meglio una card degradata che farla sparire dalla timeline.
+        const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
+          nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+        };
         sidebarList.appendChild(
           i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
         );
