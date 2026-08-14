@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.28
+// @version      0.0.29
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.28 — fumetti + tag modali)';
+  banner.textContent = 'lot-chat-viewer (v0.0.29 — fumetti + tag modali)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -827,24 +827,7 @@
       M: { color: '#ffd0d0', background: '#cc3333' },
     };
 
-    // '+' (azione): il messaggio intero è azione, un unico blocco
-    // grassetto — mai spezzato in fumetti separati come i normali. Le <>
-    // interne restano solo in corsivo (non cambiano contenitore): coprono
-    // anche le descrizioni automatiche d'ingresso/equipaggiamento.
-    function buildAzioneBlock(text) {
-      const azione = document.createElement('div');
-      azione.style.cssText = 'font-weight:800;font-size:12.5px;line-height:1.5;';
-      splitSegments(text).forEach((p, i) => {
-        if (i > 0) azione.appendChild(document.createTextNode(' '));
-        const span = document.createElement('span');
-        if (p.type === 'action') span.style.fontStyle = 'italic';
-        span.textContent = p.content;
-        azione.appendChild(span);
-      });
-      return azione;
-    }
-
-    // Messaggi normali: segmenti «azione»/parlato impilati in verticale,
+    // Segmenti «azione»/parlato impilati in verticale,
     // ognuno nel proprio fumetto (bordo tondo per il parlato, squadrato +
     // corsivo per l'azione), leggero rientro laterale per distinguerli
     // anche quando due dello stesso tipo si susseguono.
@@ -937,13 +920,7 @@
         card.appendChild(gapNote);
       }
 
-      // tipo '+' (azione/arrivo): il testo esportato dalla chat porta
-      // ancora il prefisso letterale "+ " (non un campo tipo separato
-      // come nel vecchio formato export) — va tolto prima di passare il
-      // testo pulito al blocco azione.
-      const isAzione = /^\+\s/.test(msg.testo);
-      const bodyText = isAzione ? msg.testo.replace(/^\+\s*/, '') : msg.testo;
-      card.appendChild(isAzione ? buildAzioneBlock(bodyText) : buildSpeechBubbles(bodyText));
+      card.appendChild(buildSpeechBubbles(msg.testo));
 
       return card;
     }
@@ -971,7 +948,7 @@
       nm.textContent = pg.nome;
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
       const pv = document.createElement('div');
-      pv.textContent = splitSegments(msg.testo.replace(/^\+\s*/, '')).map((p) => p.content).join(' ');
+      pv.textContent = splitSegments(msg.testo).map((p) => p.content).join(' ');
       pv.style.cssText = `font-size:10.5px;color:${COLOR_TEXT_DIM};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
