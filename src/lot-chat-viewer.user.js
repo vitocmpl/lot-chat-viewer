@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.36
+// @version      0.0.37
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -32,16 +32,16 @@
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
 
-  // Riferimento al pannello scena, assegnato quando renderTimeline lo crea
-  // (arriva dopo i fetch, non subito): il banner lo usa come interruttore
-  // acceso/spento, quindi deve tollerare il caso "non ancora pronto".
-  let scenePanel = null;
-  // Ricalcola altezza pannello + fitScale/pan-zoom quando il banner
-  // riaccende la scena: mentre era nascosta (display:none) il viewport
-  // aveva dimensioni nulle, quindi le misure prese alla creazione sono
-  // ormai stale — senza questo ricalcolo la mappa restava disallineata
-  // (dimensione/posizione sbagliate) finché non si ricaricava la pagina.
-  let refreshSceneLayout = null;
+  // Ricostruisce la scena da zero invece di limitarsi a un display:none/''.
+  // Riprovato più volte a "patchare" un semplice mostra/nascondi (ricalcolo
+  // di altezza/fitScale alla riaccensione): restava comunque disallineato
+  // in modi diversi ogni volta. Rimuovere e ricostruire elimina la classe
+  // intera di bug da misure stantie — renderTimeline si toglie già da sola
+  // di mezzo l'istanza precedente (vedi "existing" all'inizio), quindi è
+  // sicura da richiamare più volte. Nessun nuovo fetch: chatParsed/
+  // pgRecords/mappa restano gli stessi, assegnata una volta risolti.
+  let sceneVisible = true;
+  let rebuildScene = null;
 
   const banner = document.createElement('div');
   banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
@@ -52,20 +52,18 @@
     'padding:6px 10px', 'border-radius:4px', 'opacity:0.85',
   ].join(';');
   banner.addEventListener('click', () => {
-    if (!scenePanel) return;
-    const willShow = scenePanel.style.display === 'none';
-    scenePanel.style.display = willShow ? '' : 'none';
-    // Acceso: nasconde il testo grezzo della chat sotto (sostituito dalla
-    // scena) e il footer della pagina. Spento: li rimostra entrambi,
-    // nascondendo solo la scena.
-    const originalChat = document.querySelector('.lot-chat');
-    if (originalChat) originalChat.style.display = willShow ? 'none' : '';
-    const footer = document.querySelector('.lot-footer');
-    if (footer) footer.style.display = willShow ? 'none' : '';
-    // Il viewport aveva dimensioni nulle mentre era display:none: le
-    // misure vanno rifatte ora che è di nuovo visibile, altrimenti la
-    // mappa resta disallineata/rimpicciolita rispetto a quanto dovrebbe.
-    if (willShow && refreshSceneLayout) refreshSceneLayout();
+    if (sceneVisible) {
+      const existing = document.getElementById('lot-chat-viewer-scene');
+      if (existing) existing.remove();
+      const originalChat = document.querySelector('.lot-chat');
+      if (originalChat) originalChat.style.display = '';
+      const footer = document.querySelector('.lot-footer');
+      if (footer) footer.style.display = '';
+      sceneVisible = false;
+    } else if (rebuildScene) {
+      rebuildScene();
+      sceneVisible = true;
+    }
   });
 
   const mount = document.body || document.documentElement;
@@ -734,8 +732,13 @@
     for (let r = 0; r < mappa.rows; r++) {
       for (let c = 0; c < mappa.cols; c++) {
         const cell = document.createElement('div');
+        // box-sizing:border-box su tutto ciò che ha bordo + dimensione
+        // esplicita: il POC ha un reset globale (*{box-sizing:border-box}),
+        // senza il bordo si sommerebbe alla larghezza dichiarata e l'errore
+        // si accumulerebbe colonna dopo colonna, disallineando la griglia
+        // dall'immagine mappa (che invece non ha bordi propri).
         cell.style.cssText = [
-          'position:absolute', `left:${c * nativeCellW}px`, `top:${r * nativeCellH}px`,
+          'position:absolute', 'box-sizing:border-box', `left:${c * nativeCellW}px`, `top:${r * nativeCellH}px`,
           `width:${nativeCellW}px`, `height:${nativeCellH}px`,
           'border-left:1px dashed rgba(0,0,0,0.55)', 'border-top:1px dashed rgba(0,0,0,0.55)',
         ].join(';');
@@ -746,12 +749,12 @@
     mapInner.appendChild(gridCells);
 
     const activeCellEl = document.createElement('div');
-    activeCellEl.style.cssText = 'position:absolute;display:none;pointer-events:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35);';
+    activeCellEl.style.cssText = 'position:absolute;box-sizing:border-box;display:none;pointer-events:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35);';
     mapInner.appendChild(activeCellEl);
 
     const hoverCellEl = document.createElement('div');
     hoverCellEl.style.cssText = [
-      'position:absolute', 'display:none', 'pointer-events:none',
+      'position:absolute', 'box-sizing:border-box', 'display:none', 'pointer-events:none',
       'background:rgba(248,233,170,0.12)', 'border:1.5px solid rgba(248,233,170,0.65)',
       'box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35)',
     ].join(';');
@@ -1007,7 +1010,7 @@
 
       const iconBadge = document.createElement('div');
       iconBadge.style.cssText = [
-        `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto', 'overflow:hidden',
+        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto', 'overflow:hidden',
         'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
         'display:flex', 'align-items:center', 'justify-content:center',
         'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
@@ -1157,7 +1160,7 @@
           const first = group[0].pos;
           const countBadge = document.createElement('div');
           countBadge.style.cssText = [
-            'position:absolute', 'pointer-events:none', 'z-index:10000',
+            'position:absolute', 'box-sizing:border-box', 'pointer-events:none', 'z-index:10000',
             `left:${(first.col + 1) * nativeCellW - 10}px`, `top:${first.row * nativeCellH + 2}px`,
             'min-width:16px', 'height:16px', 'padding:0 3px',
             'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
@@ -1499,8 +1502,7 @@
     }
     layoutPanel();
     draw();
-    scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
-    refreshSceneLayout = layoutPanel;
+    sceneVisible = true;
 
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
@@ -1513,7 +1515,8 @@
     .then(([pgRecords, mappa]) => {
       console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
       console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
-      renderTimeline(chatParsed, pgRecords, mappa);
+      rebuildScene = () => renderTimeline(chatParsed, pgRecords, mappa);
+      rebuildScene();
     })
     .catch((err) => {
       console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
