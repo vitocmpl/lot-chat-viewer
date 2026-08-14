@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.30
+// @version      0.0.31
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.30 — in-flow al posto di .lot-chat)';
+  banner.textContent = 'lot-chat-viewer (v0.0.31 — tag MEDICO predisposto)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -233,6 +233,16 @@
   // Ordine di visualizzazione dei tag modali, identico al client reale.
   const TAG_KIND_ORDER = { F: 0, M: 1, L: 2, S: 3, A: 4, P: 5 };
 
+  // Tag MEDICO ({~MED:...} nel client reale, chat_taverne.js): sempre
+  // l'ultimo tra i tag modali, un'icona con tooltip nativo invece di un
+  // badge colorato come gli altri sei. URL confermato via scraping live
+  // (usato identico in lot-poc-3d). Nessun esempio di chat_salvate.asp
+  // con un tag MED sotto mano per confermare il nome classe CSS in
+  // QUESTO renderer (diverso da chat_taverne.asp): si prova sia uno span
+  // con lo stesso pattern msg-tag-{kind} degli altri cinque, sia un'img
+  // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
+  const MED_ICON_URL = 'https://www.extremelot.eu/lotnew/img/tagmedico.png';
+
   // Spezza una stringa reale nelle sue "pagine" alternate: azione (dentro
   // «» <> () {} []) e parlato/narrazione (il resto), nell'ordine in cui
   // compaiono nel testo. I tag [...] di metadato (coordinate/tag modali)
@@ -301,11 +311,24 @@
       });
     tags.sort((a, b) => TAG_KIND_ORDER[a.kind] - TAG_KIND_ORDER[b.kind]);
 
+    // Tag MEDICO: vedi nota su MED_ICON_URL più sopra sul perché si
+    // provano due forme possibili — va estratto PRIMA della rimozione
+    // generica di <img> qui sotto, altrimenti l'eventuale icona sarebbe
+    // già sparita quando proviamo a leggerne il tooltip.
+    let med = null;
+    const medSpan = wrap.querySelector('span.msg-tag-med');
+    if (medSpan) {
+      med = decodeEntitiesOnce(medSpan.textContent).replace(/[[\]]/g, '').trim() || null;
+    } else {
+      const medImg = wrap.querySelector('img[src*="tagmedico"]');
+      if (medImg) med = medImg.getAttribute('title') || medImg.getAttribute('alt') || 'Medico';
+    }
+
     // Testo: tutto il blocco meno timestamp/link-avatar/immagini/tag,
     // poi si toglie l'eventuale prefisso "Nome  " o "Nome  - " quando il
     // nome è incollato dentro il testo invece di essere un nodo a parte.
     wrap.querySelectorAll(
-      'span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, img, a[href*="avatar.asp"]'
+      'span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, span.msg-tag-med, img, a[href*="avatar.asp"]'
     ).forEach((el) => el.remove());
     wrap.querySelectorAll('font[color="#606060"]').forEach((el) => el.remove());
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
@@ -315,7 +338,7 @@
 
     if (!time || !speaker) return null; // blocco non riconosciuto (es. separatori/note di sistema)
 
-    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, tags, testo };
+    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo };
   }
 
   function parseChatSalvata(doc) {
@@ -900,6 +923,17 @@
         ].join(';');
         header.appendChild(tagEl);
       });
+
+      // Tag MEDICO: sempre l'ultimo tra i tag modali, icona con tooltip
+      // nativo invece di un badge colorato — nessun testo a schermo.
+      if (msg.med) {
+        const medIcon = document.createElement('img');
+        medIcon.src = MED_ICON_URL;
+        medIcon.alt = 'Medico';
+        medIcon.title = msg.med;
+        medIcon.style.cssText = 'width:15px;height:15px;flex:0 0 auto;cursor:help;';
+        header.appendChild(medIcon);
+      }
 
       if (activePos) {
         const coord = document.createElement('div');
