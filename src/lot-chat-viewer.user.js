@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.18
+// @version      0.0.19
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.18 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.19 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -525,11 +525,16 @@
 
       const first = group[0].pos;
       const badge = document.createElement('div');
+      // z-index 10000: sopra qualunque token, incluso l'attivo (9999) — nel
+      // POC il contatore doveva restare leggibile anche quando il PG "in
+      // cima" alla cella è quello che sta parlando, prima veniva coperto.
       badge.style.cssText = [
-        'position:absolute', `left:${(first.col + 1) * cellW - 10}px`, `top:${first.row * cellH + 2}px`,
-        'background:#A00000', 'color:#FFF', 'font-family:Verdana', 'font-size:9px', 'font-weight:bold',
-        'min-width:16px', 'height:16px', 'line-height:16px', 'text-align:center', 'padding:0 3px',
-        'border-radius:8px', 'border:1px solid #F8E9AA', 'box-shadow:0 0 4px rgba(0,0,0,0.6)', 'z-index:200',
+        'position:absolute', 'pointer-events:none', 'z-index:10000',
+        `left:${(first.col + 1) * cellW - 10}px`, `top:${first.row * cellH + 2}px`,
+        'min-width:16px', 'height:16px', 'padding:0 3px',
+        'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
+        'font-family:Verdana,sans-serif', 'font-size:9px', 'font-weight:bold',
+        'display:flex', 'align-items:center', 'justify-content:center', 'box-shadow:0 0 4px rgba(0,0,0,0.6)',
       ].join(';');
       badge.textContent = String(group.length);
       badge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
@@ -542,7 +547,7 @@
       token.style.cssText = [
         'position:absolute', `left:${(pos.col + 0.5) * cellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * cellH + (fanY || 0)}px`,
         'transform:translate(-50%,-50%)', 'display:flex', 'flex-direction:column', 'align-items:center',
-        `z-index:${isActive ? 999 : (zIndex || 10)}`,
+        `z-index:${isActive ? 9999 : (zIndex || 10)}`,
       ].join(';');
 
       const badge = document.createElement('div');
