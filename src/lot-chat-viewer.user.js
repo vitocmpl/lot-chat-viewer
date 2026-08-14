@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.11
+// @version      0.0.12
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.11 — ritratto + indossati/con sé)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.12 — fix indossati/con sé)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -98,16 +98,24 @@
     };
   }
 
-  // Le "item-box" (icona + nome) sono lo stesso markup usato per gli
-  // oggetti indossati/con sé, dentro .panel-indossati / .panel-conse.
-  function parseItemBoxes(container, baseUrl) {
+  // Gli oggetti dentro .panel-indossati / .panel-conse sono <img> diretti
+  // (dentro un <a>), non la card ".item-box" definita nel CSS — quella
+  // classe non è usata in questo pannello (probabilmente pensata per
+  // un'altra vista). Il nome è nell'attributo title, nel formato
+  // "Categoria - Nome" (es. "Monili - Collana"); coincide con i nomi già
+  // visti in descrizioneArmi.
+  function parseIndossatiConSe(container, baseUrl) {
     if (!container) return [];
-    return Array.from(container.querySelectorAll('.item-box')).map((box) => {
-      const img = box.querySelector('img');
-      const nameEl = box.querySelector('.item-name');
+    return Array.from(container.querySelectorAll('img')).map((img) => {
+      const title = img.getAttribute('title') || '';
+      const dashIdx = title.indexOf(' - ');
+      const categoria = dashIdx >= 0 ? title.slice(0, dashIdx).trim() : null;
+      const nome = dashIdx >= 0 ? title.slice(dashIdx + 3).trim() : (title.trim() || null);
       return {
-        nome: nameEl ? nameEl.textContent.trim() : (img ? img.getAttribute('alt') : null),
-        immagine: img ? abs(img.getAttribute('src'), baseUrl) : null,
+        categoria,
+        nome,
+        immagine: abs(img.getAttribute('src'), baseUrl),
+        link: img.getAttribute('onclick') || null,
       };
     });
   }
@@ -131,8 +139,8 @@
     const descFisica = doc.querySelector('.scroll-desc');
     const razzaLabel = doc.querySelector('.scroll-razza');
     const descArmi = doc.querySelector('.armi-desc-box');
-    const indossati = parseItemBoxes(doc.querySelector('.panel-indossati'), baseUrl);
-    const conSe = parseItemBoxes(doc.querySelector('.panel-conse'), baseUrl);
+    const indossati = parseIndossatiConSe(doc.querySelector('.panel-indossati'), baseUrl);
+    const conSe = parseIndossatiConSe(doc.querySelector('.panel-conse'), baseUrl);
 
     const armi = [];
     doc.querySelectorAll('td.slot-header').forEach((header) => {
