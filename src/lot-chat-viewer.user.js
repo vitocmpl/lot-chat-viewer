@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.37
+// @version      0.0.38
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -218,7 +218,7 @@
       razza: razzaLabel ? razzaLabel.textContent.trim() : null,
       descrizioneFisica: descFisica ? descFisica.textContent.trim() : null,
       layers,
-      armi: armi.filter((a) => a.nome), // scarta gli slot vuoti (senza TITLE)
+      armi, // tutti e 12 gli slot, anche vuoti (nome:null) — servono al modale equip a mostrare la griglia completa
       descrizioneArmi: descArmi ? descArmi.textContent.replace(/\s+/g, ' ').trim() : null,
       indossati,
       conSe,
@@ -664,6 +664,183 @@
     ].join(';');
     panel.appendChild(stageFrame);
 
+    // ---------- lightbox ritratto + popup scheda + modale equip ---------
+    // Tre overlay condivisi (un solo esemplare, riempiti via JS al click),
+    // figli di "panel" (non di stageZoom/stagePlane, che hanno un
+    // transform: un discendente position:fixed di un antenato con
+    // transform si ancorerebbe a quello invece che alla viewport reale) —
+    // rimossi automaticamente col resto quando la scena viene ricostruita.
+    const avatarLightbox = document.createElement('div');
+    avatarLightbox.style.cssText = [
+      'display:none', 'position:fixed', 'inset:0', 'z-index:2147483646',
+      'background:rgba(0,0,0,0.85)', 'align-items:center', 'justify-content:center',
+      'flex-direction:column', 'gap:10px', 'cursor:zoom-out',
+    ].join(';');
+    const avatarLightboxImg = document.createElement('img');
+    avatarLightboxImg.style.cssText = `max-width:90vw;max-height:85vh;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);border:1px solid ${COLOR_LINE};box-sizing:border-box;`;
+    const avatarLightboxName = document.createElement('div');
+    avatarLightboxName.style.cssText = `font-weight:800;font-size:13px;letter-spacing:.03em;text-transform:uppercase;color:${COLOR_GOLD};`;
+    avatarLightbox.appendChild(avatarLightboxImg);
+    avatarLightbox.appendChild(avatarLightboxName);
+    function openAvatarLightbox(url, name) {
+      avatarLightboxImg.src = url;
+      avatarLightboxName.textContent = name;
+      avatarLightbox.style.display = 'flex';
+    }
+    function closeAvatarLightbox() {
+      avatarLightbox.style.display = 'none';
+      avatarLightboxImg.src = '';
+    }
+    avatarLightbox.addEventListener('click', closeAvatarLightbox);
+    panel.appendChild(avatarLightbox);
+
+    function buildPopupShell(closeFn) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;';
+      const box = document.createElement('div');
+      box.style.cssText = [
+        'position:relative', 'width:min(420px,92vw)', 'max-height:85vh', 'overflow-y:auto',
+        `background:${COLOR_SURFACE2}`, `border:1.5px solid ${COLOR_LINE}`, 'border-radius:14px',
+        'padding:16px', 'box-shadow:0 10px 40px rgba(0,0,0,0.6)', 'box-sizing:border-box',
+      ].join(';');
+      box.addEventListener('click', (e) => e.stopPropagation());
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = `position:absolute;top:8px;right:10px;appearance:none;border:none;background:none;color:${COLOR_TEXT_DIM};font-size:20px;line-height:1;cursor:pointer;`;
+      box.appendChild(closeBtn);
+      overlay.appendChild(box);
+      closeBtn.addEventListener('click', closeFn);
+      overlay.addEventListener('click', closeFn);
+      panel.appendChild(overlay);
+      return { overlay, box };
+    }
+
+    // --- popup scheda: ritratto + descrizione fisica + link "Indosso" ---
+    const schedaShell = buildPopupShell(() => closeSchedaPopup());
+    const schedaPopupHeader = document.createElement('div');
+    schedaPopupHeader.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-right:20px;';
+    const schedaPopupAvatar = document.createElement('img');
+    schedaPopupAvatar.style.cssText = `width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid ${COLOR_LINE};flex:0 0 auto;box-sizing:border-box;`;
+    const schedaPopupName = document.createElement('div');
+    schedaPopupName.style.cssText = `font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:.03em;color:${COLOR_GOLD};`;
+    schedaPopupHeader.appendChild(schedaPopupAvatar);
+    schedaPopupHeader.appendChild(schedaPopupName);
+    const schedaPopupDescr = document.createElement('div');
+    schedaPopupDescr.style.cssText = `font-size:12.5px;line-height:1.55;color:${COLOR_TEXT};`;
+    const schedaPopupToggle = document.createElement('button');
+    schedaPopupToggle.type = 'button';
+    schedaPopupToggle.textContent = '▾ Indosso';
+    schedaPopupToggle.style.cssText = `display:none;appearance:none;margin-top:12px;background:none;border:none;color:${COLOR_EMBER};font-size:12px;font-weight:700;cursor:pointer;padding:0;`;
+    schedaShell.box.appendChild(schedaPopupHeader);
+    schedaShell.box.appendChild(schedaPopupDescr);
+    schedaShell.box.appendChild(schedaPopupToggle);
+
+    function closeSchedaPopup() {
+      schedaShell.overlay.style.display = 'none';
+    }
+
+    function openSchedaPopup(pg) {
+      schedaPopupName.textContent = pg.nome;
+      const avatarUrl = pg.ritrattoUrl || pg.censoUrl || '';
+      schedaPopupAvatar.src = avatarUrl;
+      schedaPopupAvatar.style.display = avatarUrl ? 'block' : 'none';
+      schedaPopupAvatar.style.cursor = pg.ritrattoUrl ? 'zoom-in' : 'default';
+      schedaPopupAvatar.onclick = pg.ritrattoUrl
+        ? () => { closeSchedaPopup(); openAvatarLightbox(pg.ritrattoUrl, pg.nome); }
+        : null;
+      schedaPopupDescr.textContent = (pg.aspetto && pg.aspetto.descrizioneFisica) || 'Nessuna descrizione fisica disponibile per questo PG.';
+
+      const indossati = (pg.aspetto && pg.aspetto.indossati) || [];
+      const conSe = (pg.aspetto && pg.aspetto.conSe) || [];
+      const armi = (pg.aspetto && pg.aspetto.armi) || [];
+      const hasEquipData = indossati.length > 0 || conSe.length > 0 || armi.some((a) => a.nome);
+      schedaPopupToggle.style.display = hasEquipData ? 'block' : 'none';
+      schedaPopupToggle.onclick = hasEquipData ? () => { closeSchedaPopup(); openEquipModal(pg); } : null;
+
+      schedaShell.overlay.style.display = 'flex';
+    }
+
+    // --- modale equip: indossati / con sé / equip bellico -------------
+    const equipShell = buildPopupShell(() => closeEquipModal());
+    const equipModalHeader = document.createElement('div');
+    equipModalHeader.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-right:20px;';
+    const equipModalBack = document.createElement('button');
+    equipModalBack.type = 'button';
+    equipModalBack.textContent = '←';
+    equipModalBack.style.cssText = `appearance:none;border:none;background:none;flex:0 0 auto;color:${COLOR_TEXT_DIM};font-size:18px;line-height:1;cursor:pointer;padding:0;`;
+    const equipModalName = document.createElement('div');
+    equipModalName.style.cssText = `font-weight:800;font-size:14px;text-transform:uppercase;letter-spacing:.03em;color:${COLOR_GOLD};`;
+    equipModalHeader.appendChild(equipModalBack);
+    equipModalHeader.appendChild(equipModalName);
+    const equipModalBody = document.createElement('div');
+    equipShell.box.appendChild(equipModalHeader);
+    equipShell.box.appendChild(equipModalBody);
+
+    function closeEquipModal() {
+      equipShell.overlay.style.display = 'none';
+    }
+
+    // Griglia di icone cliccabili — click apre il certificato reale in una
+    // nuova scheda, stessa idea di makeNewWindow() nel client.
+    function buildEquipGrid(items, opts) {
+      opts = opts || {};
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+      if (!items || !items.length) {
+        const empty = document.createElement('div');
+        empty.textContent = opts.emptyText || 'Vuoto';
+        empty.style.cssText = `font-size:11px;color:${COLOR_TEXT_DIM};font-style:italic;`;
+        grid.appendChild(empty);
+        return grid;
+      }
+      items.forEach((it) => {
+        if (!it.title && opts.showEmptySlots && !it.icon) return; // slot senza icona: salta
+        const slot = document.createElement('div');
+        slot.style.cssText = [
+          'width:38px', 'height:38px', 'border-radius:5px', `border:1px solid ${COLOR_LINE}`,
+          `background:${COLOR_SURFACE}`, 'overflow:hidden', 'flex:0 0 auto', 'box-sizing:border-box',
+          it.cert ? 'cursor:pointer;' : '',
+        ].join(';');
+        if (it.icon) {
+          const img = document.createElement('img');
+          img.src = it.icon;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+          slot.appendChild(img);
+        }
+        slot.title = opts.showEmptySlots ? (it.slot + (it.title ? ': ' + it.title : ' (vuoto)')) : (it.title || '');
+        if (it.cert) slot.addEventListener('click', () => window.open(it.cert, '_blank'));
+        grid.appendChild(slot);
+      });
+      return grid;
+    }
+
+    function buildEquipSection(title, items, opts) {
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-top:12px;';
+      const h = document.createElement('div');
+      h.textContent = title;
+      h.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR_TEXT_DIM};margin-bottom:6px;`;
+      section.appendChild(h);
+      section.appendChild(buildEquipGrid(items, opts));
+      return section;
+    }
+
+    function openEquipModal(pg) {
+      equipModalName.textContent = pg.nome + ' — Indosso';
+      equipModalBody.innerHTML = '';
+      const indossati = ((pg.aspetto && pg.aspetto.indossati) || []).map((it) => ({ icon: it.immagine, title: it.nome, cert: it.link }));
+      const conSe = ((pg.aspetto && pg.aspetto.conSe) || []).map((it) => ({ icon: it.immagine, title: it.nome, cert: it.link }));
+      const armi = ((pg.aspetto && pg.aspetto.armi) || []).map((it) => ({ icon: it.immagine, title: it.nome, cert: it.link, slot: it.slot }));
+      equipModalBody.appendChild(buildEquipSection('Indossati', indossati, { emptyText: 'Nessun oggetto indossato' }));
+      equipModalBody.appendChild(buildEquipSection('Con sé', conSe, { emptyText: 'Nessun oggetto con sé' }));
+      equipModalBody.appendChild(buildEquipSection('Equip bellico', armi, { showEmptySlots: true }));
+      equipModalBack.onclick = () => { closeEquipModal(); openSchedaPopup(pg); };
+      equipShell.overlay.style.display = 'flex';
+    }
+
     // ---------- viewport mappa: pan/zoom quadrato come nel POC ----------
     // .stage-viewport-wrap (centra) > .stage-viewport (quadrato, pannabile/
     // zoomabile) > .stage-zoom (transform pan+scale) > .stage-plane
@@ -990,13 +1167,23 @@
       }
       panAnimId = requestAnimationFrame(step);
     }
-    function centerOnActiveToken(pos) {
+    function centerOnActiveToken(pos, spriteEl) {
       if (!pos) return;
       const mRect = mapInner.getBoundingClientRect();
       if (!mRect.width || !mRect.height) return;
       const scaleX = mRect.width / mappa.mapWidth, scaleY = mRect.height / mappa.mapHeight;
       const screenX = mRect.left + (pos.col + 0.5) * nativeCellW * scaleX;
-      const screenY = mRect.top + (pos.row + 0.5) * nativeCellH * scaleY;
+      let screenY = mRect.top + (pos.row + 0.5) * nativeCellH * scaleY;
+      // Il modellino intero ha i piedi ancorati al centro cella: a zoom
+      // molto alto il corpo renderizzato è più alto di mezzo viewport,
+      // quindi centrare sul centro cella lascia la testa fuori
+      // dall'inquadratura. Si sposta il punto di mira in su di metà
+      // dell'altezza a schermo dello sprite — solo modellino intero, il
+      // token compatto è già centrato per intero e non ne soffre.
+      if (spriteEl) {
+        const spriteRect = spriteEl.getBoundingClientRect();
+        if (spriteRect.height) screenY -= spriteRect.height / 2;
+      }
       const vRect = viewport.getBoundingClientRect();
       const centerX = vRect.left + vRect.width / 2, centerY = vRect.top + vRect.height / 2;
       animatePanTo(view.panX + (centerX - screenX), view.panY + (centerY - screenY), 420);
@@ -1079,7 +1266,7 @@
         'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap', 'pointer-events:none',
       ].join(';');
       counter.appendChild(nametag);
-      return counter;
+      return { counter, sprite };
     }
 
     // Freccia rimbalzante sopra la testa del PG attivo, solo modellino
@@ -1121,7 +1308,6 @@
         lastActiveCoordLabel = null;
       }
       refreshIdleCoord();
-      if (recenter) centerOnActiveToken(activePos);
 
       const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
       const placed = pgRecords
@@ -1205,6 +1391,7 @@
         p.fanY = Math.max(-maxY, Math.min(maxY, fanY[p.pg.nome]));
       });
 
+      let activeSpriteEl = null;
       placed.forEach(({ pg, pos, fanX: fx, fanY: fy }) => {
         const isActive = pg.nome === activeSpeaker;
 
@@ -1219,20 +1406,39 @@
         // compatto (icona centrata per intero, come nel POC), -100% per il
         // modellino intero (piedi ancorati al centro cella, il corpo sale
         // sopra). La percentuale si risolve sull'altezza reale del
-        // contenuto (icona o sprite), qualunque essa sia.
+        // contenuto (icona o sprite), qualunque essa sia. pointer-events
+        // disattivati sul frame (46px, più largo dello sprite/icona):
+        // altrimenti la sua hitbox invisibile ruberebbe i click ai PG
+        // vicini nella stessa cella — riattivati solo sull'elemento
+        // visibile dentro (icona o sprite), il click bubbla comunque fino
+        // a qui dove sta il listener.
         const frame = document.createElement('div');
         const anchorY = compact ? '-50%' : '-100%';
-        frame.style.cssText = `position:absolute;left:0;top:0;width:46px;transform:translate(-50%, ${anchorY});`;
-        frame.appendChild(compact ? buildCompactIcon(pg, iconSize) : buildFullSprite(pg, isActive));
+        frame.style.cssText = `position:absolute;left:0;top:0;width:46px;transform:translate(-50%, ${anchorY});pointer-events:none;cursor:pointer;`;
+
+        if (compact) {
+          const icon = buildCompactIcon(pg, iconSize);
+          icon.style.pointerEvents = 'auto';
+          frame.appendChild(icon);
+        } else {
+          const built = buildFullSprite(pg, isActive);
+          built.sprite.style.pointerEvents = 'auto';
+          frame.appendChild(built.counter);
+          if (isActive) activeSpriteEl = built.sprite;
+        }
 
         // Freccia rimbalzante + glow: solo sul modellino intero del PG
         // attivo (sul token compatto basta la cella evidenziata, vedi
         // sopra — la freccia lì sarebbe ridondante).
         if (!compact && isActive) frame.appendChild(buildArrow(pg));
 
+        frame.addEventListener('click', () => openSchedaPopup(pg));
+
         token.appendChild(frame);
         tokenLayer.appendChild(token);
       });
+
+      if (recenter) centerOnActiveToken(activePos, compact ? null : activeSpriteEl);
     }
 
     const sidebar = document.createElement('div');
