@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.20
+// @version      0.0.21
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.20 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.21 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -35,7 +35,12 @@
   ].join(';');
   banner.addEventListener('click', () => {
     if (!scenePanel) return;
-    scenePanel.style.display = scenePanel.style.display === 'none' ? '' : 'none';
+    const willShow = scenePanel.style.display === 'none';
+    scenePanel.style.display = willShow ? '' : 'none';
+    // Acceso: nasconde il testo grezzo della chat sotto (sostituito dalla
+    // scena). Spento: lo rimostra, nascondendo solo la scena.
+    const originalChat = document.querySelector('.lot-chat');
+    if (originalChat) originalChat.style.display = willShow ? 'none' : '';
   });
 
   const mount = document.body || document.documentElement;
@@ -690,6 +695,12 @@
     draw();
     document.body.appendChild(panel);
     scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
+
+    // La scena parte visibile: nasconde subito il testo grezzo sotto,
+    // coerente con lo stato "acceso" gestito dal banner.
+    const originalChat = document.querySelector('.lot-chat');
+    if (originalChat) originalChat.style.display = 'none';
+
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
 
