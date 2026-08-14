@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.12
+// @version      0.0.13
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.12 — fix indossati/con sé)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.13 — mappa)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -357,12 +357,65 @@
     };
   }
 
+  // --- Parser: pagina mappa/quest (proc/chat/chat_mappa_quest.asp) ----
+  // Ci interessano solo immagine e geometria della griglia, NON le
+  // posizioni live dei PG (non combaciano col replay): le coordinate del
+  // replay vengono dai tag [G4] già estratti dalla chat. Assunzione da
+  // documentare nel README: per vedere il replay di un luogo, prima si
+  // porta il proprio PG lì su lot (altrimenti questa pagina non ha nulla
+  // da mostrare per quel luogo).
+  function parseMappaQuest(html, baseUrl) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const imgEl = doc.querySelector('#mapImage');
+    const locNameEl = doc.querySelector('.loc-name');
+    return {
+      mapUrl: imgEl ? abs(imgEl.getAttribute('src'), baseUrl) : null,
+      locationName: locNameEl ? locNameEl.textContent.trim() : null,
+    };
+  }
+
+  // Le dimensioni naturali di un'immagine sono leggibili anche cross-
+  // origin (qui l'host della mappa è extremelot.eu senza "www", diverso
+  // dal resto): solo la lettura dei pixel via <canvas> richiederebbe
+  // same-origin, non le dimensioni.
+  function loadImageSize(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => reject(new Error('immagine mappa non caricabile: ' + url));
+      img.src = url;
+    });
+  }
+
+  function fetchMappa() {
+    const url = 'https://www.extremelot.eu/proc/chat/chat_mappa_quest.asp?mode=accadimenti';
+    return fetch(url, { credentials: 'same-origin' })
+      .then((res) => res.text().then((html) => parseMappaQuest(html, res.url)))
+      .then((mappa) => {
+        if (!mappa.mapUrl) return mappa;
+        return loadImageSize(mappa.mapUrl).then((size) => {
+          const CELL = 40; // costante fissa dello strumento mappa reale di lot
+          return Object.assign({}, mappa, {
+            mapWidth: size.width,
+            mapHeight: size.height,
+            cellSize: CELL,
+            cols: Math.max(1, Math.floor(size.width / CELL)),
+            rows: Math.max(1, Math.floor(size.height / CELL)),
+          });
+        });
+      });
+  }
+
   const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
-  Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched))))
-    .then((pgRecords) => {
+  Promise.all([
+    Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
+    fetchMappa(),
+  ])
+    .then(([pgRecords, mappa]) => {
       console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
+      console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
     })
     .catch((err) => {
-      console.error('[lot-chat-viewer] errore nella risoluzione PG:', err);
+      console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
     });
 })();
