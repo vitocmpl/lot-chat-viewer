@@ -1,0 +1,22 @@
+# Dati reali di sessione/gioco: mai committare
+*.session
+*.cookie
+cookie.txt
+**/real-data/
+**/*.chatsave.json
+**/*captured*.json
+
+# URL o config con token reali (CR=, sessioni, ecc.)
+*.local.*
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Eventuale output di build/test futuri
+node_modules/
+dist/
