@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.16
+// @version      0.0.17
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.16 — stack a ventaglio)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.17 — timeline)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -461,14 +461,12 @@
     return order;
   }
 
-  function renderScene(chatParsed, pgRecords, mappa) {
-    if (!mappa.mapUrl) {
-      console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
-      return;
-    }
-    const existing = document.getElementById('lot-chat-viewer-scene');
-    if (existing) existing.remove();
-
+  // Costruisce SOLO lo stage (mappa + token + badge), come nodo DOM puro —
+  // usato sia dal primo render sia da ogni passo della timeline (prev/next
+  // lo ricostruiscono da zero sul sottoinsieme di messaggi fino all'indice
+  // corrente, invece di aggiornare incrementalmente come lot-poc-3d: più
+  // semplice per un primo passo, stesso risultato visivo).
+  function buildStageElement(messages, pgRecords, mappa) {
     const maxW = Math.min(window.innerWidth * 0.55, 700);
     const maxH = Math.min(window.innerHeight * 0.8, 700);
     const ratio = Math.min(maxW / mappa.mapWidth, maxH / mappa.mapHeight, 1);
@@ -478,20 +476,6 @@
     const cellH = dispH / mappa.rows;
     const iconSize = Math.min(cellW, cellH) * 0.75;
 
-    const panel = document.createElement('div');
-    panel.id = 'lot-chat-viewer-scene';
-    panel.style.cssText = [
-      'position:fixed', 'top:56px', 'right:8px', 'z-index:2147483646',
-      'background:#111', 'border:1px solid #444', 'border-radius:6px',
-      'padding:8px', 'box-shadow:0 4px 16px rgba(0,0,0,.5)',
-      'font-family:Verdana,Arial', 'color:#eee',
-    ].join(';');
-
-    const title = document.createElement('div');
-    title.textContent = [chatParsed.locationName, chatParsed.dateLabel].filter(Boolean).join(' — ');
-    title.style.cssText = 'font-size:12px;font-weight:bold;margin-bottom:6px;text-align:center;';
-    panel.appendChild(title);
-
     const stage = document.createElement('div');
     stage.style.cssText = `position:relative;width:${dispW}px;height:${dispH}px;overflow:hidden;border-radius:4px;`;
     const mapImgEl = document.createElement('img');
@@ -499,8 +483,9 @@
     mapImgEl.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill;';
     stage.appendChild(mapImgEl);
 
-    const positions = lastKnownPositions(chatParsed.messages);
-    const stackOrder = buildStackOrder(chatParsed.messages);
+    const positions = lastKnownPositions(messages);
+    const stackOrder = buildStackOrder(messages);
+    const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
 
     const placed = pgRecords
       .map((pg) => ({ pg, pos: positions[pg.nome] }))
@@ -542,17 +527,20 @@
     });
 
     placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
+      const isActive = pg.nome === activeSpeaker;
       const token = document.createElement('div');
       token.style.cssText = [
         'position:absolute', `left:${(pos.col + 0.5) * cellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * cellH + (fanY || 0)}px`,
         'transform:translate(-50%,-50%)', 'display:flex', 'flex-direction:column', 'align-items:center',
-        `z-index:${zIndex || 10}`,
+        `z-index:${isActive ? 999 : (zIndex || 10)}`,
       ].join(';');
 
       const badge = document.createElement('div');
       badge.style.cssText = [
-        `width:${iconSize}px`, `height:${iconSize}px`, 'border:2px solid #F8E9AA', 'border-radius:4px',
-        'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+        `width:${iconSize}px`, `height:${iconSize}px`,
+        `border:2px solid ${isActive ? '#FFD866' : '#F8E9AA'}`, 'border-radius:4px',
+        'background:rgba(0,0,0,0.6)', 'overflow:hidden',
+        `box-shadow:0 0 ${isActive ? '10px 3px' : '6px'} rgba(248,233,170,${isActive ? '0.9' : '0.4'})`,
         'display:flex', 'align-items:center', 'justify-content:center',
       ].join(';');
       if (pg.censoUrl) {
@@ -574,10 +562,93 @@
       stage.appendChild(token);
     });
 
-    panel.appendChild(stage);
+    return stage;
+  }
+
+  // --- Timeline: naviga i messaggi uno alla volta, ricostruendo lo stage
+  // sul sottoinsieme messages[0..indice] a ogni passo (posizioni + stack
+  // riflettono sempre "cosa si vedrebbe a quel punto della giocata").
+  function renderTimeline(chatParsed, pgRecords, mappa) {
+    if (!mappa.mapUrl) {
+      console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
+      return;
+    }
+    const existing = document.getElementById('lot-chat-viewer-scene');
+    if (existing) existing.remove();
+    if (!chatParsed.messages.length) {
+      console.warn('[lot-chat-viewer] nessun messaggio parsato, salto la timeline');
+      return;
+    }
+
+    let index = chatParsed.messages.length - 1; // parte dall'ultimo stato noto
+
+    const panel = document.createElement('div');
+    panel.id = 'lot-chat-viewer-scene';
+    panel.style.cssText = [
+      'position:fixed', 'top:56px', 'right:8px', 'z-index:2147483646',
+      'background:#111', 'border:1px solid #444', 'border-radius:6px',
+      'padding:8px', 'box-shadow:0 4px 16px rgba(0,0,0,.5)',
+      'font-family:Verdana,Arial', 'color:#eee',
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.textContent = [chatParsed.locationName, chatParsed.dateLabel].filter(Boolean).join(' — ');
+    title.style.cssText = 'font-size:12px;font-weight:bold;margin-bottom:6px;text-align:center;';
+    panel.appendChild(title);
+
+    const stageSlot = document.createElement('div');
+    panel.appendChild(stageSlot);
+
+    const msgBox = document.createElement('div');
+    msgBox.style.cssText = [
+      'margin-top:6px', 'padding:6px 8px', 'background:rgba(255,255,255,0.06)',
+      'border-radius:4px', 'max-width:700px', 'box-sizing:border-box',
+    ].join(';');
+    panel.appendChild(msgBox);
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px;';
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '◀';
+    const counter = document.createElement('span');
+    counter.style.cssText = 'font-size:11px;';
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = '▶';
+    [prevBtn, nextBtn].forEach((btn) => {
+      btn.style.cssText = 'font-family:Verdana;cursor:pointer;padding:2px 10px;';
+    });
+    controls.appendChild(prevBtn);
+    controls.appendChild(counter);
+    controls.appendChild(nextBtn);
+    panel.appendChild(controls);
+
+    function draw() {
+      const messages = chatParsed.messages.slice(0, index + 1);
+      stageSlot.innerHTML = '';
+      stageSlot.appendChild(buildStageElement(messages, pgRecords, mappa));
+
+      const current = chatParsed.messages[index];
+      msgBox.innerHTML = '';
+      const head = document.createElement('div');
+      head.textContent = current.time + ' — ' + current.speaker + (current.posLabel ? ' (' + current.posLabel + ')' : '');
+      head.style.cssText = 'font-weight:bold;font-size:11px;color:#F8E9AA;margin-bottom:3px;';
+      const body = document.createElement('div');
+      body.textContent = current.testo;
+      body.style.cssText = 'font-size:11px;max-height:90px;overflow-y:auto;line-height:1.4;';
+      msgBox.appendChild(head);
+      msgBox.appendChild(body);
+
+      counter.textContent = (index + 1) + ' / ' + chatParsed.messages.length;
+      prevBtn.disabled = index <= 0;
+      nextBtn.disabled = index >= chatParsed.messages.length - 1;
+    }
+
+    prevBtn.addEventListener('click', () => { if (index > 0) { index -= 1; draw(); } });
+    nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) { index += 1; draw(); } });
+
+    draw();
     document.body.appendChild(panel);
-    console.log('[lot-chat-viewer] scena renderizzata:', placed.length, 'PG posizionati su', pgRecords.length,
-      '— stackOrder:', JSON.stringify(stackOrder));
+    console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
 
   const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
@@ -588,7 +659,7 @@
     .then(([pgRecords, mappa]) => {
       console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
       console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
-      renderScene(chatParsed, pgRecords, mappa);
+      renderTimeline(chatParsed, pgRecords, mappa);
     })
     .catch((err) => {
       console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
