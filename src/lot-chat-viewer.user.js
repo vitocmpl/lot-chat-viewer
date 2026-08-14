@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.14
+// @version      0.0.15
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.14 — link certificato pulito)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.15 — primo rendering scena)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -417,6 +417,113 @@
       });
   }
 
+  // --- Rendering: mappa + token compatti (stemma + nome), stessa formula
+  // di ancoraggio cella-centro e stessa dimensione icona già validate in
+  // lot-poc-3d (min(cellW,cellH)*0.75) — qui solo la versione "token
+  // compatto", senza pan/zoom/modellino intero: primo prototipo statico.
+  function colIndexFromLetters(letters) {
+    if (letters.length === 1) return letters.charCodeAt(0) - 65;
+    return (letters.charCodeAt(0) - 64) * 26 + (letters.charCodeAt(1) - 65);
+  }
+
+  function parseCoord(raw) {
+    if (!raw) return null;
+    const m = raw.match(/^([A-Za-z]+)(\d+)$/);
+    if (!m) return null;
+    return { col: colIndexFromLetters(m[1].toUpperCase()), row: parseInt(m[2], 10) - 1 };
+  }
+
+  // Ultima posizione nota per PG: l'ultimo messaggio con un tag coordinata
+  // valido, nell'ordine della chat — coerente con "cosa si vedrebbe aprendo
+  // la mappa alla fine di questa sessione di replay".
+  function lastKnownPositions(messages) {
+    const pos = {};
+    messages.forEach((m) => {
+      const c = parseCoord(m.coordRaw);
+      if (c) pos[m.speaker] = c;
+    });
+    return pos;
+  }
+
+  function renderScene(chatParsed, pgRecords, mappa) {
+    if (!mappa.mapUrl) {
+      console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
+      return;
+    }
+    const existing = document.getElementById('lot-chat-viewer-scene');
+    if (existing) existing.remove();
+
+    const maxW = Math.min(window.innerWidth * 0.55, 700);
+    const maxH = Math.min(window.innerHeight * 0.8, 700);
+    const ratio = Math.min(maxW / mappa.mapWidth, maxH / mappa.mapHeight, 1);
+    const dispW = Math.floor(mappa.mapWidth * ratio);
+    const dispH = Math.floor(mappa.mapHeight * ratio);
+    const cellW = dispW / mappa.cols;
+    const cellH = dispH / mappa.rows;
+    const iconSize = Math.min(cellW, cellH) * 0.75;
+
+    const panel = document.createElement('div');
+    panel.id = 'lot-chat-viewer-scene';
+    panel.style.cssText = [
+      'position:fixed', 'top:56px', 'right:8px', 'z-index:2147483646',
+      'background:#111', 'border:1px solid #444', 'border-radius:6px',
+      'padding:8px', 'box-shadow:0 4px 16px rgba(0,0,0,.5)',
+      'font-family:Verdana,Arial', 'color:#eee',
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.textContent = [chatParsed.locationName, chatParsed.dateLabel].filter(Boolean).join(' — ');
+    title.style.cssText = 'font-size:12px;font-weight:bold;margin-bottom:6px;text-align:center;';
+    panel.appendChild(title);
+
+    const stage = document.createElement('div');
+    stage.style.cssText = `position:relative;width:${dispW}px;height:${dispH}px;overflow:hidden;border-radius:4px;`;
+    const mapImgEl = document.createElement('img');
+    mapImgEl.src = mappa.mapUrl;
+    mapImgEl.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill;';
+    stage.appendChild(mapImgEl);
+
+    const positions = lastKnownPositions(chatParsed.messages);
+    pgRecords.forEach((pg) => {
+      const pos = positions[pg.nome];
+      if (!pos || pos.col < 0 || pos.col >= mappa.cols || pos.row < 0 || pos.row >= mappa.rows) return;
+
+      const token = document.createElement('div');
+      token.style.cssText = [
+        'position:absolute', `left:${(pos.col + 0.5) * cellW}px`, `top:${(pos.row + 0.5) * cellH}px`,
+        'transform:translate(-50%,-50%)', 'display:flex', 'flex-direction:column', 'align-items:center',
+      ].join(';');
+
+      const badge = document.createElement('div');
+      badge.style.cssText = [
+        `width:${iconSize}px`, `height:${iconSize}px`, 'border:2px solid #F8E9AA', 'border-radius:4px',
+        'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+        'display:flex', 'align-items:center', 'justify-content:center',
+      ].join(';');
+      if (pg.censoUrl) {
+        const img = document.createElement('img');
+        img.src = pg.censoUrl;
+        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+        badge.appendChild(img);
+      } else {
+        badge.textContent = pg.nome.charAt(0).toUpperCase();
+        badge.style.color = '#F8E9AA';
+      }
+
+      const label = document.createElement('div');
+      label.textContent = pg.nome;
+      label.style.cssText = 'font-size:9px;color:#F8E9AA;text-shadow:0 0 4px #000;margin-top:1px;white-space:nowrap;';
+
+      token.appendChild(badge);
+      token.appendChild(label);
+      stage.appendChild(token);
+    });
+
+    panel.appendChild(stage);
+    document.body.appendChild(panel);
+    console.log('[lot-chat-viewer] scena renderizzata:', Object.keys(positions).length, 'PG posizionati su', pgRecords.length);
+  }
+
   const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
   Promise.all([
     Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
@@ -425,6 +532,7 @@
     .then(([pgRecords, mappa]) => {
       console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
       console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
+      renderScene(chatParsed, pgRecords, mappa);
     })
     .catch((err) => {
       console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
