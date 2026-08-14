@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.32
+// @version      0.0.33
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.32 — fix dimensione token + footer)';
+  banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -594,157 +594,6 @@
     return order;
   }
 
-  // Costruisce SOLO lo stage (mappa + token + badge), come nodo DOM puro —
-  // usato sia dal primo render sia da ogni passo della timeline (prev/next
-  // lo ricostruiscono da zero sul sottoinsieme di messaggi fino all'indice
-  // corrente, invece di aggiornare incrementalmente come lot-poc-3d: più
-  // semplice per un primo passo, stesso risultato visivo).
-  function buildStageElement(messages, pgRecords, mappa, maxW, maxH) {
-    const ratio = Math.min(maxW / mappa.mapWidth, maxH / mappa.mapHeight, 1);
-    const dispW = Math.floor(mappa.mapWidth * ratio);
-    const dispH = Math.floor(mappa.mapHeight * ratio);
-    const cellW = dispW / mappa.cols;
-    const cellH = dispH / mappa.rows;
-    // La dimensione del token è contro-scalata rispetto al rimpicciolimento
-    // della mappa (--token-icon-scale = 1/fitScale nel POC): il badge
-    // resta sempre al 75% della cella "nativa" (dimensione reale
-    // dell'immagine), non di quella già ridotta per stare nel riquadro —
-    // altrimenti più la mappa si rimpicciolisce più il token risulterebbe
-    // piccolo, difforme da come si vede nel POC.
-    const nativeCellW = mappa.mapWidth / mappa.cols;
-    const nativeCellH = mappa.mapHeight / mappa.rows;
-    const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
-
-    const stage = document.createElement('div');
-    stage.style.cssText = `position:relative;width:${dispW}px;height:${dispH}px;overflow:hidden;border-radius:4px;`;
-    const mapImgEl = document.createElement('img');
-    mapImgEl.src = mappa.mapUrl;
-    mapImgEl.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill;';
-    stage.appendChild(mapImgEl);
-
-    const positions = lastKnownPositions(messages);
-    const stackOrder = buildStackOrder(messages);
-    const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
-
-    // Cella evidenziata persistente del PG attivo (colore = sua identità),
-    // dietro ai token — nel token compatto non c'è glow extra sull'icona
-    // (già bordata di suo, sarebbe ridondante): l'indicatore vero è questo
-    // marcatore di cella più l'ordine dello stack (chi parla va in cima).
-    const activePos = activeSpeaker ? positions[activeSpeaker] : null;
-    if (activePos && activePos.col >= 0 && activePos.col < mappa.cols && activePos.row >= 0 && activePos.row < mappa.rows) {
-      const accent = `hsl(${pgHue(activeSpeaker)} 62% 52%)`;
-      const activeCell = document.createElement('div');
-      activeCell.style.cssText = [
-        'position:absolute', `left:${activePos.col * cellW}px`, `top:${activePos.row * cellH}px`,
-        `width:${cellW}px`, `height:${cellH}px`, 'pointer-events:none',
-        `border:2px solid ${accent}`, `background:color-mix(in srgb, ${accent} 20%, transparent)`,
-        'box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35)',
-      ].join(';');
-      stage.appendChild(activeCell);
-    }
-
-    const placed = pgRecords
-      .map((pg) => ({ pg, pos: positions[pg.nome] }))
-      .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
-
-    // Raggruppa per cella: dentro ogni gruppo con 2+ PG, ventaglio diagonale
-    // ordinato dal meno al più recentemente attivo (stackOrder), stesso
-    // i*5 di lot-poc-3d, clampato al raggio della cella.
-    const groups = {};
-    placed.forEach((p) => {
-      const key = p.pos.col + ',' + p.pos.row;
-      (groups[key] = groups[key] || []).push(p);
-    });
-
-    const maxFan = Math.min(cellW, cellH) * 0.42;
-
-    Object.keys(groups).forEach((key) => {
-      const group = groups[key];
-      if (group.length < 2) return;
-      group.sort((a, b) => stackOrder.indexOf(a.pg.nome) - stackOrder.indexOf(b.pg.nome));
-      group.forEach((p, i) => {
-        const offset = Math.min(i * 5, maxFan);
-        p.fanX = offset;
-        p.fanY = offset;
-        p.zIndex = 100 + i;
-      });
-
-      const first = group[0].pos;
-      const badge = document.createElement('div');
-      // z-index 10000: sopra qualunque token, incluso l'attivo (9999) — nel
-      // POC il contatore doveva restare leggibile anche quando il PG "in
-      // cima" alla cella è quello che sta parlando, prima veniva coperto.
-      badge.style.cssText = [
-        'position:absolute', 'pointer-events:none', 'z-index:10000',
-        `left:${(first.col + 1) * cellW - 10}px`, `top:${first.row * cellH + 2}px`,
-        'min-width:16px', 'height:16px', 'padding:0 3px',
-        'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
-        'font-family:Verdana,sans-serif', 'font-size:9px', 'font-weight:bold',
-        'display:flex', 'align-items:center', 'justify-content:center', 'box-shadow:0 0 4px rgba(0,0,0,0.6)',
-      ].join(';');
-      badge.textContent = String(group.length);
-      badge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
-      stage.appendChild(badge);
-    });
-
-    placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
-      const isActive = pg.nome === activeSpeaker;
-
-      // Struttura in due livelli come lot-poc-3d: "token" è un'ancora a
-      // dimensione zero piazzata esattamente al centro cella; "badge" è
-      // centrato sull'ancora con translate(-50%,-50%) sul proprio riquadro
-      // (icona sola, senza l'etichetta). L'etichetta è assoluta sotto,
-      // quindi NON contribuisce all'altezza centrata — se fosse dentro lo
-      // stesso box centrato (come nella prima versione, un semplice flex
-      // column badge+etichetta), l'etichetta spingerebbe lo stemma sopra
-      // il vero centro della cella invece di lasciarlo lì.
-      const token = document.createElement('div');
-      token.style.cssText = [
-        'position:absolute', `left:${(pos.col + 0.5) * cellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * cellH + (fanY || 0)}px`,
-        'width:0', 'height:0', `z-index:${isActive ? 9999 : (zIndex || 10)}`,
-      ].join(';');
-
-      // "badge" è solo il box di posizionamento (nessun overflow:hidden qui,
-      // altrimenti taglierebbe l'etichetta assoluta sotto); "art" dentro è
-      // il riquadro bordato con l'immagine, quello sì con overflow:hidden.
-      const badge = document.createElement('div');
-      badge.style.cssText = [
-        'position:absolute', 'left:0', 'top:0', 'transform:translate(-50%,-50%)',
-        `width:${iconSize}px`, `height:${iconSize}px`,
-      ].join(';');
-
-      const art = document.createElement('div');
-      art.style.cssText = [
-        'position:absolute', 'inset:0', 'border:2px solid #F8E9AA', 'border-radius:4px',
-        'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
-        'display:flex', 'align-items:center', 'justify-content:center',
-      ].join(';');
-      if (pg.censoUrl) {
-        const img = document.createElement('img');
-        img.src = pg.censoUrl;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-        art.appendChild(img);
-      } else {
-        art.textContent = pg.nome.charAt(0).toUpperCase();
-        art.style.color = '#F8E9AA';
-      }
-
-      const label = document.createElement('div');
-      label.textContent = pg.nome;
-      label.style.cssText = [
-        'position:absolute', 'top:100%', 'left:50%', 'transform:translateX(-50%)', 'margin-top:1px',
-        'font-size:9px', 'color:#F8E9AA', 'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
-      ].join(';');
-
-      badge.appendChild(art);
-      badge.appendChild(label);
-      token.appendChild(badge);
-      stage.appendChild(token);
-    });
-
-    return stage;
-  }
-
   // --- Timeline: naviga i messaggi uno alla volta, ricostruendo lo stage
   // sul sottoinsieme messages[0..indice] a ogni passo (posizioni + stack
   // riflettono sempre "cosa si vedrebbe a quel punto della giocata").
@@ -795,11 +644,424 @@
     ].join(';');
     panel.appendChild(stageFrame);
 
+    // ---------- viewport mappa: pan/zoom quadrato come nel POC ----------
+    // .stage-viewport-wrap (centra) > .stage-viewport (quadrato, pannabile/
+    // zoomabile) > .stage-zoom (transform pan+scale) > .stage-plane
+    // (dimensione nativa mappa+margine) > .map-inner (mappa/griglia/token,
+    // tutto in coordinate NATIVE — è il transform CSS sull'antenato a
+    // adattarlo al riquadro, non un ridimensionamento a monte come nella
+    // prima versione statica). Costruito UNA VOLTA (non ad ogni draw()):
+    // solo tokenLayer/activeCell vengono aggiornati passo per passo.
+    const LABEL_MARGIN_LEFT = 18, LABEL_MARGIN_TOP = 16;
+    const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
+    const nativeCellW = mappa.mapWidth / mappa.cols;
+    const nativeCellH = mappa.mapHeight / mappa.rows;
+    const view = { zoom: 1, panX: 0, panY: 0 };
+    let fitScale = 1;
+    let lastActiveCoordLabel = null;
+
     const stageWrap = document.createElement('div');
     stageWrap.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;';
-    const stageSlot = document.createElement('div');
-    stageWrap.appendChild(stageSlot);
     stageFrame.appendChild(stageWrap);
+
+    const viewport = document.createElement('div');
+    viewport.style.cssText = [
+      'width:auto', 'height:auto', 'max-width:100%', 'max-height:100%', 'aspect-ratio:1 / 1',
+      'overflow:hidden', 'border-radius:8px', 'background:#111', 'position:relative',
+      'display:flex', 'align-items:center', 'justify-content:center', 'user-select:none',
+      'cursor:grab', 'touch-action:none',
+    ].join(';');
+    stageWrap.appendChild(viewport);
+
+    const stageZoom = document.createElement('div');
+    stageZoom.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+    viewport.appendChild(stageZoom);
+
+    const stagePlane = document.createElement('div');
+    stagePlane.style.cssText = [
+      'position:relative', 'flex:0 0 auto', 'transform-origin:center center',
+      `width:${mappa.mapWidth + LABEL_MARGIN_LEFT}px`, `height:${mappa.mapHeight + LABEL_MARGIN_TOP}px`,
+    ].join(';');
+    stageZoom.appendChild(stagePlane);
+
+    const mapInner = document.createElement('div');
+    mapInner.style.cssText = `position:absolute;left:${LABEL_MARGIN_LEFT}px;top:${LABEL_MARGIN_TOP}px;width:${mappa.mapWidth}px;height:${mappa.mapHeight}px;`;
+    stagePlane.appendChild(mapInner);
+
+    const mapImgEl = document.createElement('img');
+    mapImgEl.src = mappa.mapUrl;
+    mapImgEl.alt = '';
+    mapImgEl.draggable = false;
+    mapImgEl.style.cssText = 'position:absolute;inset:0;display:block;width:100%;height:100%;user-select:none;';
+    mapInner.appendChild(mapImgEl);
+
+    // Griglia: linee tratteggiate solo top/left per cella (affiancate
+    // ricompongono un reticolo unico senza doppiare le linee), stesso
+    // stile dello strumento mappa reale.
+    const gridCells = document.createElement('div');
+    gridCells.style.cssText = 'position:absolute;inset:0;';
+    const cellsFrag = document.createDocumentFragment();
+    for (let r = 0; r < mappa.rows; r++) {
+      for (let c = 0; c < mappa.cols; c++) {
+        const cell = document.createElement('div');
+        cell.style.cssText = [
+          'position:absolute', `left:${c * nativeCellW}px`, `top:${r * nativeCellH}px`,
+          `width:${nativeCellW}px`, `height:${nativeCellH}px`,
+          'border-left:1px dashed rgba(0,0,0,0.55)', 'border-top:1px dashed rgba(0,0,0,0.55)',
+        ].join(';');
+        cellsFrag.appendChild(cell);
+      }
+    }
+    gridCells.appendChild(cellsFrag);
+    mapInner.appendChild(gridCells);
+
+    const activeCellEl = document.createElement('div');
+    activeCellEl.style.cssText = 'position:absolute;display:none;pointer-events:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35);';
+    mapInner.appendChild(activeCellEl);
+
+    const hoverCellEl = document.createElement('div');
+    hoverCellEl.style.cssText = [
+      'position:absolute', 'display:none', 'pointer-events:none',
+      'background:rgba(248,233,170,0.12)', 'border:1.5px solid rgba(248,233,170,0.65)',
+      'box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35)',
+    ].join(';');
+    mapInner.appendChild(hoverCellEl);
+
+    const tokenLayer = document.createElement('div');
+    tokenLayer.style.cssText = 'position:absolute;inset:0;';
+    mapInner.appendChild(tokenLayer);
+
+    // Righello fisso (fuori da stageZoom: non deve pannare/zoomare col
+    // resto), ricalcolato ad ogni pan/zoom in renderRuler().
+    const rulerCol = document.createElement('div');
+    rulerCol.style.cssText = [
+      'position:absolute', 'top:0', 'left:0', 'right:0', 'height:18px', 'z-index:15',
+      'background:#111', 'border-bottom:1px solid rgba(248,233,170,0.15)', 'overflow:hidden', 'pointer-events:none',
+    ].join(';');
+    viewport.appendChild(rulerCol);
+    const rulerRow = document.createElement('div');
+    rulerRow.style.cssText = [
+      'position:absolute', 'top:0', 'left:0', 'bottom:0', 'width:20px', 'z-index:15',
+      'background:#111', 'border-right:1px solid rgba(248,233,170,0.15)', 'overflow:hidden', 'pointer-events:none',
+    ].join(';');
+    viewport.appendChild(rulerRow);
+
+    const zoomOverlay = document.createElement('div');
+    zoomOverlay.style.cssText = [
+      'position:absolute', 'top:28px', 'left:26px', 'z-index:20', 'display:flex', 'align-items:center', 'gap:7px',
+      'background:rgba(0,0,0,0.78)', 'border:1px solid rgba(248,233,170,0.3)', 'border-radius:6px', 'padding:4px 8px',
+    ].join(';');
+    const zoomReadout = document.createElement('span');
+    zoomReadout.textContent = '100%';
+    zoomReadout.style.cssText = [
+      'font-family:ui-monospace,Consolas,monospace', 'font-size:12px', 'font-weight:bold', 'color:#F8E9AA',
+      'text-shadow:0 0 4px #000,0 0 8px #000', 'font-variant-numeric:tabular-nums', 'min-width:34px', 'text-align:center',
+    ].join(';');
+    const resetViewBtn = document.createElement('button');
+    resetViewBtn.type = 'button';
+    resetViewBtn.textContent = '⟲';
+    resetViewBtn.title = 'Torna a zoom 100% centrato';
+    resetViewBtn.style.cssText = [
+      'appearance:none', 'border:1px solid rgba(248,233,170,0.35)', 'background:rgba(248,233,170,0.08)',
+      'color:#F8E9AA', 'border-radius:4px', 'padding:2px 7px', 'font-size:13px', 'line-height:1.4', 'cursor:pointer',
+    ].join(';');
+    zoomOverlay.appendChild(zoomReadout);
+    zoomOverlay.appendChild(resetViewBtn);
+    viewport.appendChild(zoomOverlay);
+
+    const hoverCoordEl = document.createElement('div');
+    hoverCoordEl.textContent = '—';
+    hoverCoordEl.style.cssText = [
+      'position:absolute', 'top:28px', 'right:16px', 'z-index:20',
+      'font-family:Verdana,sans-serif', 'font-size:12px', 'font-weight:bold', 'color:#F8E9AA',
+      'background:rgba(0,0,0,0.78)', 'border:1px solid rgba(248,233,170,0.3)', 'text-shadow:0 0 4px #000,0 0 8px #000',
+      'border-radius:6px', 'padding:4px 10px', 'pointer-events:none', 'min-width:34px', 'text-align:center',
+    ].join(';');
+    viewport.appendChild(hoverCoordEl);
+
+    function updateFitScale() {
+      const rect = viewport.getBoundingClientRect();
+      fitScale = rect.width > 0 ? (rect.width / (mappa.mapWidth + LABEL_MARGIN_LEFT)) : 1;
+    }
+
+    function renderRuler() {
+      rulerCol.innerHTML = '';
+      rulerRow.innerHTML = '';
+      const mRect = mapInner.getBoundingClientRect();
+      const vRect = viewport.getBoundingClientRect();
+      if (!mRect.width || !mRect.height) return;
+      const scaleX = mRect.width / mappa.mapWidth, scaleY = mRect.height / mappa.mapHeight;
+      for (let c = 0; c < mappa.cols; c++) {
+        const screenX = mRect.left + (c + 0.5) * nativeCellW * scaleX;
+        if (screenX < vRect.left - 10 || screenX > vRect.right + 10) continue;
+        const lbl = document.createElement('div');
+        lbl.style.cssText = `position:absolute;font-family:Verdana,sans-serif;font-size:11px;color:#888;left:${screenX - vRect.left}px;top:2px;transform:translateX(-50%);`;
+        lbl.textContent = colLetter(c);
+        rulerCol.appendChild(lbl);
+      }
+      for (let r = 0; r < mappa.rows; r++) {
+        const screenY = mRect.top + (r + 0.5) * nativeCellH * scaleY;
+        if (screenY < vRect.top - 10 || screenY > vRect.bottom + 10) continue;
+        const lbl2 = document.createElement('div');
+        lbl2.style.cssText = `position:absolute;font-family:Verdana,sans-serif;font-size:11px;color:#888;top:${screenY - vRect.top}px;left:3px;transform:translateY(-50%);`;
+        lbl2.textContent = String(r + 1);
+        rulerRow.appendChild(lbl2);
+      }
+    }
+
+    function applyView() {
+      const scale = (fitScale || 1) * view.zoom;
+      stageZoom.style.transform = `translate(${view.panX}px,${view.panY}px) scale(${scale})`;
+      zoomReadout.textContent = Math.round(view.zoom * 100) + '%';
+      // Contro-scala il token compatto (75% della cella nativa) rispetto al
+      // solo fitScale, non allo zoom interattivo — stesso principio del
+      // POC (--token-icon-scale): a zoom 100% il badge rende alla
+      // dimensione "vera" indipendentemente da quanto la mappa si è dovuta
+      // rimpicciolire per stare nel riquadro quadrato.
+      tokenLayer.style.setProperty('--token-icon-scale', fitScale ? (1 / fitScale) : 1);
+      renderRuler();
+    }
+
+    function resetView() {
+      view.zoom = 1; view.panX = 0; view.panY = 0;
+      applyView();
+    }
+    resetViewBtn.addEventListener('click', resetView);
+    window.addEventListener('resize', () => { updateFitScale(); applyView(); });
+
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const mx = e.clientX - (rect.left + rect.width / 2);
+      const my = e.clientY - (rect.top + rect.height / 2);
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.zoom * factor));
+      const ratio = newZoom / view.zoom;
+      view.panX = mx - (mx - view.panX) * ratio;
+      view.panY = my - (my - view.panY) * ratio;
+      view.zoom = newZoom;
+      applyView();
+    }, { passive: false });
+
+    const drag = { active: false, moved: false, startX: 0, startY: 0, startPanX: 0, startPanY: 0, pointerId: null };
+    viewport.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      drag.active = true; drag.moved = false;
+      drag.startX = e.clientX; drag.startY = e.clientY;
+      drag.startPanX = view.panX; drag.startPanY = view.panY;
+      drag.pointerId = e.pointerId;
+    });
+    viewport.addEventListener('pointermove', (e) => {
+      if (!drag.active || e.pointerId !== drag.pointerId) return;
+      const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+      if (!drag.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        drag.moved = true;
+        viewport.setPointerCapture(e.pointerId);
+        viewport.style.cursor = 'grabbing';
+      }
+      if (drag.moved) {
+        view.panX = drag.startPanX + dx;
+        view.panY = drag.startPanY + dy;
+        applyView();
+      }
+    });
+    function endDrag(e) {
+      if (!drag.active) return;
+      try { viewport.releasePointerCapture(e.pointerId); } catch (err) { /* noop */ }
+      drag.active = false;
+      viewport.style.cursor = 'grab';
+    }
+    viewport.addEventListener('pointerup', endDrag);
+    viewport.addEventListener('pointercancel', endDrag);
+
+    function cellFromClientPoint(clientX, clientY) {
+      const rect = mapInner.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      const localX = (clientX - rect.left) / (rect.width / mappa.mapWidth);
+      const localY = (clientY - rect.top) / (rect.height / mappa.mapHeight);
+      const col = Math.floor(localX / nativeCellW);
+      const row = Math.floor(localY / nativeCellH);
+      if (col < 0 || col >= mappa.cols || row < 0 || row >= mappa.rows) return null;
+      return { col, row };
+    }
+    function showHoverCell(cell) {
+      if (!cell) { hoverCellEl.style.display = 'none'; return; }
+      hoverCellEl.style.left = (cell.col * nativeCellW) + 'px';
+      hoverCellEl.style.top = (cell.row * nativeCellH) + 'px';
+      hoverCellEl.style.width = nativeCellW + 'px';
+      hoverCellEl.style.height = nativeCellH + 'px';
+      hoverCellEl.style.display = 'block';
+    }
+    let isHoveringMap = false;
+    function activeCoordLabel() {
+      return lastActiveCoordLabel || '—';
+    }
+    function refreshIdleCoord() {
+      if (!isHoveringMap) hoverCoordEl.textContent = activeCoordLabel();
+    }
+    viewport.addEventListener('mousemove', (e) => {
+      isHoveringMap = true;
+      const cell = cellFromClientPoint(e.clientX, e.clientY);
+      hoverCoordEl.textContent = cell ? (colLetter(cell.col) + (cell.row + 1)) : activeCoordLabel();
+      showHoverCell(cell);
+    });
+    viewport.addEventListener('mouseleave', () => {
+      isHoveringMap = false;
+      hoverCoordEl.textContent = activeCoordLabel();
+      showHoverCell(null);
+    });
+
+    // Aggiorna SOLO token/cella attiva sul sottoinsieme di messaggi fino
+    // all'indice corrente — la struttura mappa/griglia/righello sopra
+    // resta la stessa per tutta la sessione di replay, come nel POC
+    // (buildRosterDom una volta sola, poi solo placeTokenDom/refreshStacks
+    // per ogni passo di timeline).
+    // Pan automatico verso il PG attivo, se non è già lì — anima invece di
+    // scattare di colpo. Solo token compatto qui (nessun modellino intero
+    // ancora): è già centrato per intero sulla cella, nessun aggiustamento
+    // extra di offset verticale necessario (il POC lo aggiunge solo per il
+    // modellino intero, dove i piedi sono ancorati al fondo della cella).
+    let panAnimId = null;
+    function animatePanTo(targetPanX, targetPanY, duration) {
+      if (panAnimId) cancelAnimationFrame(panAnimId);
+      const startX = view.panX, startY = view.panY;
+      let startT = null;
+      function step(ts) {
+        if (startT === null) startT = ts;
+        const p = Math.min(1, (ts - startT) / duration);
+        const ease = 1 - Math.pow(1 - p, 3);
+        view.panX = startX + (targetPanX - startX) * ease;
+        view.panY = startY + (targetPanY - startY) * ease;
+        applyView();
+        panAnimId = (p < 1) ? requestAnimationFrame(step) : null;
+      }
+      panAnimId = requestAnimationFrame(step);
+    }
+    function centerOnActiveToken(pos) {
+      if (!pos) return;
+      const mRect = mapInner.getBoundingClientRect();
+      if (!mRect.width || !mRect.height) return;
+      const scaleX = mRect.width / mappa.mapWidth, scaleY = mRect.height / mappa.mapHeight;
+      const screenX = mRect.left + (pos.col + 0.5) * nativeCellW * scaleX;
+      const screenY = mRect.top + (pos.row + 0.5) * nativeCellH * scaleY;
+      const vRect = viewport.getBoundingClientRect();
+      const centerX = vRect.left + vRect.width / 2, centerY = vRect.top + vRect.height / 2;
+      animatePanTo(view.panX + (centerX - screenX), view.panY + (centerY - screenY), 420);
+    }
+
+    function updateTokens(messages, pgRecords) {
+      tokenLayer.innerHTML = '';
+      const positions = lastKnownPositions(messages);
+      const stackOrder = buildStackOrder(messages);
+      const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
+
+      const activePos = activeSpeaker ? positions[activeSpeaker] : null;
+      if (activePos && activePos.col >= 0 && activePos.col < mappa.cols && activePos.row >= 0 && activePos.row < mappa.rows) {
+        const accent = `hsl(${pgHue(activeSpeaker)} 62% 52%)`;
+        activeCellEl.style.left = (activePos.col * nativeCellW) + 'px';
+        activeCellEl.style.top = (activePos.row * nativeCellH) + 'px';
+        activeCellEl.style.width = nativeCellW + 'px';
+        activeCellEl.style.height = nativeCellH + 'px';
+        activeCellEl.style.border = `2px solid ${accent}`;
+        activeCellEl.style.background = `color-mix(in srgb, ${accent} 20%, transparent)`;
+        activeCellEl.style.display = 'block';
+        lastActiveCoordLabel = colLetter(activePos.col) + (activePos.row + 1);
+      } else {
+        activeCellEl.style.display = 'none';
+        lastActiveCoordLabel = null;
+      }
+      refreshIdleCoord();
+      centerOnActiveToken(activePos);
+
+      const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
+      const placed = pgRecords
+        .map((pg) => ({ pg, pos: positions[pg.nome] }))
+        .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
+
+      const groups = {};
+      placed.forEach((p) => {
+        const key = p.pos.col + ',' + p.pos.row;
+        (groups[key] = groups[key] || []).push(p);
+      });
+
+      const maxFan = Math.min(nativeCellW, nativeCellH) * 0.42;
+
+      Object.keys(groups).forEach((key) => {
+        const group = groups[key];
+        if (group.length < 2) return;
+        group.sort((a, b) => stackOrder.indexOf(a.pg.nome) - stackOrder.indexOf(b.pg.nome));
+        group.forEach((p, i) => {
+          const offset = Math.min(i * 5, maxFan);
+          p.fanX = offset;
+          p.fanY = offset;
+          p.zIndex = 100 + i;
+        });
+
+        const first = group[0].pos;
+        const countBadge = document.createElement('div');
+        countBadge.style.cssText = [
+          'position:absolute', 'pointer-events:none', 'z-index:10000',
+          `left:${(first.col + 1) * nativeCellW - 10}px`, `top:${first.row * nativeCellH + 2}px`,
+          'min-width:16px', 'height:16px', 'padding:0 3px',
+          'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
+          'font-family:Verdana,sans-serif', 'font-size:9px', 'font-weight:bold',
+          'display:flex', 'align-items:center', 'justify-content:center', 'box-shadow:0 0 4px rgba(0,0,0,0.6)',
+        ].join(';');
+        countBadge.textContent = String(group.length);
+        countBadge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
+        tokenLayer.appendChild(countBadge);
+      });
+
+      placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
+        const isActive = pg.nome === activeSpeaker;
+
+        const token = document.createElement('div');
+        token.style.cssText = [
+          'position:absolute', `left:${(pos.col + 0.5) * nativeCellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * nativeCellH + (fanY || 0)}px`,
+          'width:0', 'height:0', `z-index:${isActive ? 9999 : (zIndex || 10)}`,
+        ].join(';');
+
+        // "badge" centra sull'ancora E contro-scala il fitScale in un solo
+        // transform — il figlio "label" (assoluto sotto, vedi sotto) eredita
+        // la stessa scala essendo dentro badge, coprendo così anche il suo
+        // equivalente --icon-label-scale nel POC senza doverlo applicare
+        // separatamente (stesso valore in entrambi i casi nel POC).
+        const badge = document.createElement('div');
+        badge.style.cssText = [
+          'position:absolute', 'left:0', 'top:0',
+          'transform:translate(-50%,-50%) scale(var(--token-icon-scale,1))',
+          `width:${iconSize}px`, `height:${iconSize}px`,
+        ].join(';');
+
+        const art = document.createElement('div');
+        art.style.cssText = [
+          'position:absolute', 'inset:0', 'border:2px solid #F8E9AA', 'border-radius:4px',
+          'background:rgba(0,0,0,0.6)', 'overflow:hidden', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+        ].join(';');
+        if (pg.censoUrl) {
+          const img = document.createElement('img');
+          img.src = pg.censoUrl;
+          img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+          art.appendChild(img);
+        } else {
+          art.textContent = pg.nome.charAt(0).toUpperCase();
+          art.style.color = '#F8E9AA';
+        }
+
+        const label = document.createElement('div');
+        label.textContent = pg.nome;
+        label.style.cssText = [
+          'position:absolute', 'top:100%', 'left:50%', 'transform:translateX(-50%)', 'margin-top:1px',
+          'font-size:9px', 'color:#F8E9AA', 'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
+        ].join(';');
+
+        badge.appendChild(art);
+        badge.appendChild(label);
+        token.appendChild(badge);
+        tokenLayer.appendChild(token);
+      });
+    }
 
     const sidebar = document.createElement('div');
     sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
@@ -1013,9 +1275,7 @@
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
-      const rect = stageWrap.getBoundingClientRect();
-      stageSlot.innerHTML = '';
-      stageSlot.appendChild(buildStageElement(messages, pgRecords, mappa, rect.width, rect.height));
+      updateTokens(messages, pgRecords);
 
       // Posizioni note "fino ad ora" nella timeline (stesso sottoinsieme
       // usato per la mappa): solo la card espansa mostra la coordinata,
@@ -1064,7 +1324,11 @@
     const top = panel.getBoundingClientRect().top;
     panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
 
-    draw(); // dopo l'inserimento: serve il layout reale (getBoundingClientRect) per dimensionare la mappa
+    // Dopo l'inserimento: serve il layout reale (getBoundingClientRect) per
+    // calcolare fitScale e la geometria del righello.
+    updateFitScale();
+    applyView();
+    draw();
     scenePanel = panel; // il banner in alto lo usa come interruttore mostra/nascondi
 
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
