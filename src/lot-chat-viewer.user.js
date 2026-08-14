@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.6
+// @version      0.0.7
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.6 — parser scheda/aspetto)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.7 — parser chat)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -35,9 +35,6 @@
   } else {
     console.warn('[lot-chat-viewer] nessun body/documentElement disponibile, banner non mostrato');
   }
-
-  // TODO: parsing del transcript chat salvata già presente nella pagina
-  // (DOM di .lot-chat, non il formato a riga singola del vecchio POC)
 
   // TODO: rendering scena (mappa + modellini) al posto/accanto al testo
 
@@ -142,6 +139,110 @@
       descrizioneArmi: descArmi ? descArmi.textContent.replace(/\s+/g, ' ').trim() : null,
     };
   }
+
+  // --- Parser: transcript della chat salvata (DOM di .lot-chat) -------
+  // La pagina NON incapsula ogni messaggio in un contenitore dedicato: i
+  // nodi sono un flusso piatto di FONT/A/IMG/SPAN/testo dentro .lot-chat.
+  // L'unico punto di ancoraggio affidabile è il font grigio del timestamp
+  // (#606060) che apre ogni messaggio: si raggruppano i nodi successivi
+  // fino al prossimo timestamp per ottenere un "blocco" per messaggio.
+  //
+  // Per il parlante non ci si affida al testo (il nome a volte è un
+  // elemento separato, a volte è incollato dentro il testo con 2-3 spazi
+  // o " - " come separatore, a seconda del tipo di messaggio): si usa
+  // invece il link '../avatar.asp?id=NOME', sempre presente nel blocco
+  // sia nel caso venga messo dentro il timestamp sia come nodo fratello.
+  function isGreyTimestampFont(node) {
+    return node.nodeType === 1 && node.tagName === 'FONT'
+      && (node.getAttribute('color') || '').toUpperCase() === '#606060'
+      && /\d{2}:\d{2}/.test(node.textContent);
+  }
+
+  function speakerFromBlock(wrap) {
+    const avatarLink = wrap.querySelector('a[href*="avatar.asp?id="]');
+    if (!avatarLink) return null;
+    const m = avatarLink.getAttribute('href').match(/id=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function parseBlock(timeFont, restNodes, baseDoc) {
+    const timeMatch = timeFont.textContent.match(/(\d{2}:\d{2})/);
+    const time = timeMatch ? timeMatch[1] : null;
+
+    const wrap = baseDoc.createElement('div');
+    wrap.appendChild(timeFont.cloneNode(true));
+    restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
+
+    const speaker = speakerFromBlock(wrap);
+
+    const razzaImg = wrap.querySelector('img[src*="/razze/"]');
+    const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    const stemmaImg = wrap.querySelector('img[src*="/stemmi/"]');
+    const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
+
+    const coordSpan = wrap.querySelector('span.msg-pos-tag');
+    const coordRaw = coordSpan ? coordSpan.textContent.replace(/[[\]]/g, '').trim() : null;
+    const labelSpan = wrap.querySelector('span.msg-tag-pos');
+    const posLabel = labelSpan ? labelSpan.textContent.replace(/[[\]]/g, '').trim() : null;
+
+    // Testo: tutto il blocco meno timestamp/link-avatar/immagini/tag,
+    // poi si toglie l'eventuale prefisso "Nome  " o "Nome  - " quando il
+    // nome è incollato dentro il testo invece di essere un nodo a parte.
+    wrap.querySelectorAll('span.msg-pos-tag, span.msg-tag-pos, img, a[href*="avatar.asp"]').forEach((el) => el.remove());
+    wrap.querySelectorAll('font[color="#606060"]').forEach((el) => el.remove());
+    let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
+    if (speaker && testo.startsWith(speaker)) {
+      testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
+    }
+
+    if (!time || !speaker) return null; // blocco non riconosciuto (es. separatori/note di sistema)
+
+    return { time, speaker, razzaIcon, censoUrl, coordRaw, posLabel, testo };
+  }
+
+  function parseChatSalvata(doc) {
+    const titleEl = doc.querySelector('.lot-title');
+    let locationName = null;
+    if (titleEl) {
+      const clone = titleEl.cloneNode(true);
+      const closeLink = clone.querySelector('.lot-close');
+      if (closeLink) closeLink.remove();
+      locationName = clone.textContent.trim();
+    }
+    const dateLabel = doc.querySelector('.lot-subtitle') ? doc.querySelector('.lot-subtitle').textContent.trim() : null;
+
+    const chatEl = doc.querySelector('.lot-chat');
+    if (!chatEl) return { locationName, dateLabel, messages: [] };
+
+    const messages = [];
+    let currentTimeFont = null;
+    let currentRest = [];
+    Array.from(chatEl.childNodes).forEach((node) => {
+      if (isGreyTimestampFont(node)) {
+        if (currentTimeFont) {
+          const parsed = parseBlock(currentTimeFont, currentRest, doc);
+          if (parsed) messages.push(parsed);
+        }
+        currentTimeFont = node;
+        currentRest = [];
+      } else if (currentTimeFont) {
+        currentRest.push(node);
+      }
+    });
+    if (currentTimeFont) {
+      const parsed = parseBlock(currentTimeFont, currentRest, doc);
+      if (parsed) messages.push(parsed);
+    }
+
+    return { locationName, dateLabel, messages };
+  }
+
+  const chatParsed = parseChatSalvata(document);
+  console.log('[lot-chat-viewer] chat parsata:', chatParsed.locationName, chatParsed.dateLabel,
+    '—', chatParsed.messages.length, 'messaggi');
+  const roster = Array.from(new Set(chatParsed.messages.map((m) => m.speaker)));
+  console.log('[lot-chat-viewer] roster:', roster);
+  console.log('[lot-chat-viewer] primi 8 messaggi:', chatParsed.messages.slice(0, 8));
 
   // --- Probe: verifica che il fetch same-origin funzioni e che i parser
   // producano dati sensati, prima di collegare tutto al rendering. Sola
