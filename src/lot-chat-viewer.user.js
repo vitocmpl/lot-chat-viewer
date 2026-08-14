@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.13
+// @version      0.0.14
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.13 — mappa)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.14 — link certificato pulito)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -50,6 +50,17 @@
     } catch (e) {
       return rawUrl;
     }
+  }
+
+  // makeNewWindow(...) negli onclick apre sempre il certificato dell'oggetto
+  // come primo argomento; per gli oggetti indossati porta anche id/nome PG e
+  // un'azione ("TOGLI"/"METTI") che serve solo per disindossare/indossare
+  // sul proprio PG — irrilevante qui, siamo sola lettura. Si tiene solo
+  // l'URL del certificato.
+  function extractCertUrl(onclick) {
+    if (!onclick) return null;
+    const m = onclick.match(/makeNewWindow\(\s*["']([^"']+)["']/);
+    return m ? m[1] : null;
   }
 
   // --- Parser: pagina scheda PG (proc/schedaPG/sx.asp?ID=...) ---------
@@ -115,7 +126,7 @@
         categoria,
         nome,
         immagine: abs(img.getAttribute('src'), baseUrl),
-        link: img.getAttribute('onclick') || null,
+        link: extractCertUrl(img.getAttribute('onclick')),
       };
     });
   }
@@ -161,7 +172,7 @@
         slot: header.textContent.trim(),
         nome: img ? (img.title || null) : null,
         immagine: img ? abs(img.getAttribute('src'), baseUrl) : null,
-        link: link ? link.getAttribute('onclick') || abs(link.getAttribute('href'), baseUrl) : null,
+        link: link ? extractCertUrl(link.getAttribute('onclick')) || abs(link.getAttribute('href'), baseUrl) : null,
       });
     });
 
