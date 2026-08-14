@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.15
+// @version      0.0.16
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -21,7 +21,7 @@
     'top frame?', window.top === window);
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer attivo (v0.0.15 — primo rendering scena)';
+  banner.textContent = 'lot-chat-viewer attivo (v0.0.16 — stack a ventaglio)';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace',
@@ -445,6 +445,22 @@
     return pos;
   }
 
+  // Ordine "chi è salito in cima più di recente": ogni volta che un PG
+  // parla, si sposta in fondo all'array (= più recente). Simulato sull'
+  // intera chat fino alla fine, stessa logica di lot-poc-3d (lì costruito
+  // in tempo reale scorrendo la timeline; qui in un colpo solo perché non
+  // abbiamo ancora una timeline — il risultato finale è identico).
+  function buildStackOrder(messages) {
+    const order = [];
+    messages.forEach((m) => {
+      if (!m.speaker) return;
+      const idx = order.indexOf(m.speaker);
+      if (idx !== -1) order.splice(idx, 1);
+      order.push(m.speaker);
+    });
+    return order;
+  }
+
   function renderScene(chatParsed, pgRecords, mappa) {
     if (!mappa.mapUrl) {
       console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
@@ -484,14 +500,53 @@
     stage.appendChild(mapImgEl);
 
     const positions = lastKnownPositions(chatParsed.messages);
-    pgRecords.forEach((pg) => {
-      const pos = positions[pg.nome];
-      if (!pos || pos.col < 0 || pos.col >= mappa.cols || pos.row < 0 || pos.row >= mappa.rows) return;
+    const stackOrder = buildStackOrder(chatParsed.messages);
 
+    const placed = pgRecords
+      .map((pg) => ({ pg, pos: positions[pg.nome] }))
+      .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
+
+    // Raggruppa per cella: dentro ogni gruppo con 2+ PG, ventaglio diagonale
+    // ordinato dal meno al più recentemente attivo (stackOrder), stesso
+    // i*5 di lot-poc-3d, clampato al raggio della cella.
+    const groups = {};
+    placed.forEach((p) => {
+      const key = p.pos.col + ',' + p.pos.row;
+      (groups[key] = groups[key] || []).push(p);
+    });
+
+    const maxFan = Math.min(cellW, cellH) * 0.42;
+
+    Object.keys(groups).forEach((key) => {
+      const group = groups[key];
+      if (group.length < 2) return;
+      group.sort((a, b) => stackOrder.indexOf(a.pg.nome) - stackOrder.indexOf(b.pg.nome));
+      group.forEach((p, i) => {
+        const offset = Math.min(i * 5, maxFan);
+        p.fanX = offset;
+        p.fanY = offset;
+        p.zIndex = 100 + i;
+      });
+
+      const first = group[0].pos;
+      const badge = document.createElement('div');
+      badge.style.cssText = [
+        'position:absolute', `left:${(first.col + 1) * cellW - 10}px`, `top:${first.row * cellH + 2}px`,
+        'background:#A00000', 'color:#FFF', 'font-family:Verdana', 'font-size:9px', 'font-weight:bold',
+        'min-width:16px', 'height:16px', 'line-height:16px', 'text-align:center', 'padding:0 3px',
+        'border-radius:8px', 'border:1px solid #F8E9AA', 'box-shadow:0 0 4px rgba(0,0,0,0.6)', 'z-index:200',
+      ].join(';');
+      badge.textContent = String(group.length);
+      badge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
+      stage.appendChild(badge);
+    });
+
+    placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
       const token = document.createElement('div');
       token.style.cssText = [
-        'position:absolute', `left:${(pos.col + 0.5) * cellW}px`, `top:${(pos.row + 0.5) * cellH}px`,
+        'position:absolute', `left:${(pos.col + 0.5) * cellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * cellH + (fanY || 0)}px`,
         'transform:translate(-50%,-50%)', 'display:flex', 'flex-direction:column', 'align-items:center',
+        `z-index:${zIndex || 10}`,
       ].join(';');
 
       const badge = document.createElement('div');
@@ -521,7 +576,8 @@
 
     panel.appendChild(stage);
     document.body.appendChild(panel);
-    console.log('[lot-chat-viewer] scena renderizzata:', Object.keys(positions).length, 'PG posizionati su', pgRecords.length);
+    console.log('[lot-chat-viewer] scena renderizzata:', placed.length, 'PG posizionati su', pgRecords.length,
+      '— stackOrder:', JSON.stringify(stackOrder));
   }
 
   const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
