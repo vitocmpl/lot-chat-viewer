@@ -18,9 +18,18 @@ Uno userscript (Tampermonkey/Violentmonkey — funziona su Chrome, Firefox, Edge
 - arricchisce la visualizzazione recuperando, con richieste same-origin nella stessa sessione del giocatore (nessuna credenziale gestita da questo progetto), dati già pubblici per quel giocatore su lot: scheda dei personaggi citati in chat, mappa del luogo
 - disegna una scena con mappa e modellini al posto — o accanto — al testo grezzo
 
+## Installazione
+
+1. Installa un userscript manager nel tuo browser: [Tampermonkey](https://www.tampermonkey.net) (Chrome, Firefox, Edge, Safari, Opera) o in alternativa Violentmonkey. Cercalo nello store estensioni del tuo browser oppure vai sul sito ufficiale.
+2. Apri questo link nel browser dove hai installato l'estensione: [`src/lot-chat-viewer.user.js`](https://raw.githubusercontent.com/vitocmpl/lot-chat-viewer/main/src/lot-chat-viewer.user.js) — Tampermonkey riconosce automaticamente il file e propone l'installazione.
+3. Conferma l'installazione nella finestra che appare.
+4. Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner *"lot-chat-viewer attivo"* — conferma che lo script gira correttamente sulla pagina.
+
+Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampermonkey (grazie a `@updateURL`), senza bisogno di reinstallare a mano.
+
 ## Stato
 
-In fase di progettazione iniziale. Vedi le issue del repo per lo stato di avanzamento.
+Versione iniziale "hello world": lo script si attiva sulla pagina giusta e lo segnala con un banner, senza ancora leggere/visualizzare la chat. Vedi le issue del repo per lo stato di avanzamento.
 
 ## Licenza
 
