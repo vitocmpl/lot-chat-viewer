@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.23
+// @version      0.0.24
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -26,7 +26,7 @@
   let scenePanel = null;
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer (v0.0.23 — clicca per mostrare/nascondere)';
+  banner.textContent = 'lot-chat-viewer (v0.0.24 — clicca per mostrare/nascondere)';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -519,12 +519,12 @@
     // marcatore di cella più l'ordine dello stack (chi parla va in cima).
     const activePos = activeSpeaker ? positions[activeSpeaker] : null;
     if (activePos && activePos.col >= 0 && activePos.col < mappa.cols && activePos.row >= 0 && activePos.row < mappa.rows) {
-      const hue = pgHue(activeSpeaker);
+      const accent = `hsl(${pgHue(activeSpeaker)} 62% 52%)`;
       const activeCell = document.createElement('div');
       activeCell.style.cssText = [
         'position:absolute', `left:${activePos.col * cellW}px`, `top:${activePos.row * cellH}px`,
         `width:${cellW}px`, `height:${cellH}px`, 'pointer-events:none',
-        `border:2px solid hsl(${hue} 62% 52%)`, `background:hsl(${hue} 62% 52% / 0.2)`,
+        `border:2px solid ${accent}`, `background:color-mix(in srgb, ${accent} 20%, transparent)`,
         'box-shadow:inset 0 0 0 1px rgba(0,0,0,0.35)',
       ].join(';');
       stage.appendChild(activeCell);
