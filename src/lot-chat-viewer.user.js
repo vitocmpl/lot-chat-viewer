@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.35
+// @version      0.0.36
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @run-at       document-idle
@@ -16,6 +16,18 @@
   // Sola lettura: questo script legge il DOM/le risposte già ricevute dal
   // browser del giocatore nella sua sessione. Non invia comandi al gioco,
   // non altera form o input, non salva/inoltra nulla verso server terzi.
+
+  // @keyframes non è esprimibile via style inline: serve un vero <style>,
+  // iniettato una sola volta. Nome univoco per non collidere con eventuali
+  // keyframes della pagina ospite.
+  const arrowStyle = document.createElement('style');
+  arrowStyle.textContent = `
+    @keyframes lotChatViewerArrowBounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(4px); }
+    }
+  `;
+  document.head.appendChild(arrowStyle);
 
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
@@ -663,7 +675,10 @@
     // prima versione statica). Costruito UNA VOLTA (non ad ogni draw()):
     // solo tokenLayer/activeCell vengono aggiornati passo per passo.
     const LABEL_MARGIN_LEFT = 18, LABEL_MARGIN_TOP = 16;
-    const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
+    const ZOOM_MIN = 0.5;
+    // "una cella = tutta la mappa" deve restare raggiungibile: il max si
+    // adatta al numero di celle sul lato più lungo, non un valore fisso.
+    const ZOOM_MAX = Math.max(mappa.cols, mappa.rows) * 1.1;
     // Sotto questa soglia il modellino intero non si apprezzerebbe comunque
     // (troppo piccolo) e sconfina più facilmente dalla cella: si passa al
     // token compatto stile "stemma", come lo strumento mappa reale.
@@ -1026,12 +1041,16 @@
     // Modellino intero: layer sovrapposti (corpo, vestito, eventuali
     // accessori — pg.aspetto.layers è già nell'ordine di stacking corretto),
     // ombra ellittica ai piedi, nome sotto ancorato al fondo dello sprite.
-    function buildFullSprite(pg) {
+    function buildFullSprite(pg, isActive) {
       const counter = document.createElement('div');
       counter.style.cssText = 'position:relative;width:100%;transform-origin:bottom center;';
 
       const sprite = document.createElement('div');
       sprite.style.cssText = 'position:relative;width:23px;height:41px;margin:0 auto;';
+      // Glow colorato (identità del PG) solo sul modellino che sta
+      // parlando — sul token compatto è già dentro un riquadro bordato di
+      // suo, il glow lì sarebbe ridondante (vedi la cella evidenziata).
+      if (isActive) sprite.style.filter = `drop-shadow(0 0 5px ${pgAccentColor(pg.nome)})`;
       ((pg.aspetto && pg.aspetto.layers) || []).forEach((url) => {
         const img = document.createElement('img');
         img.src = url;
@@ -1058,6 +1077,21 @@
       ].join(';');
       counter.appendChild(nametag);
       return counter;
+    }
+
+    // Freccia rimbalzante sopra la testa del PG attivo, solo modellino
+    // intero — colore identità del PG, animazione definita in arrowStyle
+    // (iniettato una volta sola in cima allo script).
+    function buildArrow(pg) {
+      const arrow = document.createElement('div');
+      arrow.textContent = '▼';
+      arrow.style.cssText = [
+        'position:absolute', 'left:50%', 'top:-16px', 'transform:translateX(-50%)',
+        'font-size:15px', 'line-height:1', 'pointer-events:none', 'z-index:11',
+        `color:${pgAccentColor(pg.nome)}`, 'filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7))',
+        'animation:lotChatViewerArrowBounce 1s ease-in-out infinite',
+      ].join(';');
+      return arrow;
     }
 
     function updateTokens(messages, pgRecords, opts) {
@@ -1091,47 +1125,90 @@
         .map((pg) => ({ pg, pos: positions[pg.nome] }))
         .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
 
+      // Gruppi per cella, in ordine di roster stabile (NON stackOrder): sia
+      // il badge-count sia la disposizione a righe del modellino intero
+      // dipendono solo da chi è in quella cella, mai da chi sta parlando
+      // in questo istante — altrimenti l'intero ventaglio si "rimescola"
+      // ad ogni battuta anche senza alcun movimento reale dei PG.
       const groups = {};
       placed.forEach((p) => {
         const key = p.pos.col + ',' + p.pos.row;
         (groups[key] = groups[key] || []).push(p);
       });
 
-      const maxFan = Math.min(nativeCellW, nativeCellH) * 0.42;
+      const maxX = nativeCellW * 0.42, maxY = nativeCellH * 0.42;
+      const fanX = {}, fanY = {};
+      placed.forEach((p) => { fanX[p.pg.nome] = 0; fanY[p.pg.nome] = 0; });
 
-      Object.keys(groups).forEach((key) => {
-        const group = groups[key];
-        if (group.length < 2) return;
-        group.sort((a, b) => stackOrder.indexOf(a.pg.nome) - stackOrder.indexOf(b.pg.nome));
-        group.forEach((p, i) => {
-          const offset = Math.min(i * 5, maxFan);
-          p.fanX = offset;
-          p.fanY = offset;
-          p.zIndex = 100 + i;
+      if (compact) {
+        // Token compatto: ventaglio diagonale, ordinato dal meno al più
+        // recentemente attivo (stackOrder) — chi sta parlando ora sale in
+        // cima alla pila. Badge numerico nell'angolo alto a destra della
+        // cella, sostituisce del tutto i token quando sono 2+.
+        Object.keys(groups).forEach((key) => {
+          const group = groups[key];
+          if (group.length < 2) return;
+          const ordered = group.slice().sort((a, b) => stackOrder.indexOf(a.pg.nome) - stackOrder.indexOf(b.pg.nome));
+          ordered.forEach((p, i) => {
+            fanX[p.pg.nome] += i * 5;
+            fanY[p.pg.nome] += i * 5;
+          });
+
+          const first = group[0].pos;
+          const countBadge = document.createElement('div');
+          countBadge.style.cssText = [
+            'position:absolute', 'pointer-events:none', 'z-index:10000',
+            `left:${(first.col + 1) * nativeCellW - 10}px`, `top:${first.row * nativeCellH + 2}px`,
+            'min-width:16px', 'height:16px', 'padding:0 3px',
+            'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
+            'font-family:Verdana,sans-serif', 'font-size:9px', 'font-weight:bold',
+            'display:flex', 'align-items:center', 'justify-content:center', 'box-shadow:0 0 4px rgba(0,0,0,0.6)',
+          ].join(';');
+          countBadge.textContent = String(group.length);
+          countBadge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
+          tokenLayer.appendChild(countBadge);
         });
+      } else {
+        // Modellino intero: nessun collasso in badge, tutti i PG sulla
+        // stessa cella restano visibili distribuiti su più righe. Righe:
+        // 1 fino a 3 PG, 2 fino a 6, 3 da 7 in su, offset verticali fissi
+        // (tarati per uno sprite alto ~1 cella, non ricavati da maxY).
+        const ROW_Y = { 1: [0], 2: [-11, 11], 3: [-15, 0, 15] };
+        Object.keys(groups).forEach((key) => {
+          const ids = groups[key];
+          if (ids.length < 2) return;
+          const rowCount = ids.length <= 3 ? 1 : (ids.length <= 6 ? 2 : 3);
+          const base = Math.floor(ids.length / rowCount), extra = ids.length % rowCount;
+          const spacing = ids.length > 2 ? 26 : 20;
+          let idx = 0;
+          for (let r = 0; r < rowCount; r++) {
+            const rowSize = base + (r < extra ? 1 : 0);
+            const rowIds = ids.slice(idx, idx + rowSize);
+            idx += rowSize;
+            const midCol = (rowIds.length - 1) / 2;
+            const rowOffsetX = (r - (rowCount - 1) / 2) * 9;
+            let rowSpacing = spacing;
+            if (midCol > 0) rowSpacing = Math.min(spacing, (maxX - Math.abs(rowOffsetX)) / midCol);
+            rowIds.forEach((p, i) => {
+              fanX[p.pg.nome] += (i - midCol) * rowSpacing + rowOffsetX;
+              fanY[p.pg.nome] += ROW_Y[rowCount][r];
+            });
+          }
+        });
+      }
 
-        const first = group[0].pos;
-        const countBadge = document.createElement('div');
-        countBadge.style.cssText = [
-          'position:absolute', 'pointer-events:none', 'z-index:10000',
-          `left:${(first.col + 1) * nativeCellW - 10}px`, `top:${first.row * nativeCellH + 2}px`,
-          'min-width:16px', 'height:16px', 'padding:0 3px',
-          'background:#a00000', 'color:#fff', 'border:1px solid #F8E9AA', 'border-radius:8px',
-          'font-family:Verdana,sans-serif', 'font-size:9px', 'font-weight:bold',
-          'display:flex', 'align-items:center', 'justify-content:center', 'box-shadow:0 0 4px rgba(0,0,0,0.6)',
-        ].join(';');
-        countBadge.textContent = String(group.length);
-        countBadge.title = 'Qui presenti (' + group.length + '): ' + group.map((p) => p.pg.nome).join(', ');
-        tokenLayer.appendChild(countBadge);
+      placed.forEach((p) => {
+        p.fanX = Math.max(-maxX, Math.min(maxX, fanX[p.pg.nome]));
+        p.fanY = Math.max(-maxY, Math.min(maxY, fanY[p.pg.nome]));
       });
 
-      placed.forEach(({ pg, pos, fanX, fanY, zIndex }) => {
+      placed.forEach(({ pg, pos, fanX: fx, fanY: fy }) => {
         const isActive = pg.nome === activeSpeaker;
 
         const token = document.createElement('div');
         token.style.cssText = [
-          'position:absolute', `left:${(pos.col + 0.5) * nativeCellW + (fanX || 0)}px`, `top:${(pos.row + 0.5) * nativeCellH + (fanY || 0)}px`,
-          'width:0', 'height:0', `z-index:${isActive ? 9999 : (zIndex || 10)}`,
+          'position:absolute', `left:${(pos.col + 0.5) * nativeCellW + (fx || 0)}px`, `top:${(pos.row + 0.5) * nativeCellH + (fy || 0)}px`,
+          'width:0', 'height:0', `z-index:${isActive ? 9999 : (100 + pos.row)}`,
         ].join(';');
 
         // "frame" fa l'ancoraggio: -50% orizzontale sempre (centrato sulla
@@ -1143,7 +1220,12 @@
         const frame = document.createElement('div');
         const anchorY = compact ? '-50%' : '-100%';
         frame.style.cssText = `position:absolute;left:0;top:0;width:46px;transform:translate(-50%, ${anchorY});`;
-        frame.appendChild(compact ? buildCompactIcon(pg, iconSize) : buildFullSprite(pg));
+        frame.appendChild(compact ? buildCompactIcon(pg, iconSize) : buildFullSprite(pg, isActive));
+
+        // Freccia rimbalzante + glow: solo sul modellino intero del PG
+        // attivo (sul token compatto basta la cella evidenziata, vedi
+        // sopra — la freccia lì sarebbe ridondante).
+        if (!compact && isActive) frame.appendChild(buildArrow(pg));
 
         token.appendChild(frame);
         tokenLayer.appendChild(token);
