@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.45
+// @version      0.0.46
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -452,7 +452,25 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // Colore "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
+  // il client avvolge tutto (nick+testo) in un unico <span style="color:
+  // ...">, spesso personalizzato (es. rosso per i master) — è quello lo
+  // span da leggere, non il nick. Il tipo 'N' non ha un colore proprio per
+  // il corpo del messaggio (solo il nick ce l'ha): in quel caso si prende
+  // il colore ereditato di default della pagina. getComputedStyle risolve
+  // già le CSS var() (--testo-msg ecc.) al valore rgb() reale corrente —
+  // ma solo su un nodo ancora agganciato al documento, mai su un clone
+  // scollegato: va chiamato PRIMA di clonare l'elemento in parseTavernaMsgEl.
+  function resolveMsgColor(el) {
+    const bodySpan = Array.from(el.children).find((c) => (
+      c.tagName === 'SPAN' && c.style && c.style.color
+      && !c.classList.contains('msg-ora') && !c.classList.contains('msg-nick')
+    ));
+    return getComputedStyle(bodySpan || el).color || null;
+  }
+
   function parseTavernaMsgEl(el) {
+    const msgColor = resolveMsgColor(el);
     const wrap = el.cloneNode(true);
 
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
@@ -532,7 +550,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType,
+      unsupportedType, msgType, msgColor,
     };
   }
 
@@ -786,9 +804,16 @@
     // Layout a schermo intero, due colonne (mappa | timeline) — senza una
     // toolbar di selezione in alto: qui la chat è già quella aperta nella
     // pagina, non c'è nulla da scegliere.
-    const COLOR_BG = '#120f0c';
-    const COLOR_SURFACE = '#1c1610';
-    const COLOR_SURFACE2 = '#281f16';
+    // In live, sfondo pannello e sfondo delle card/fumetti seguono lo
+    // stesso sfondo che #chat-messages ha in quel momento su lot (letto via
+    // getComputedStyle prima del rebuild — vedi opts.lotBgColor più sotto),
+    // invece del bordeaux scuro inventato per il replay: coerenza visiva
+    // con la chat reale, chiaro o notturno a seconda di cosa l'utente ha
+    // già scelto su lot.
+    const LOT_BG = mode === 'live' ? opts.lotBgColor : null;
+    const COLOR_BG = LOT_BG || '#120f0c';
+    const COLOR_SURFACE = LOT_BG || '#1c1610';
+    const COLOR_SURFACE2 = LOT_BG || '#281f16';
     const COLOR_LINE = '#3a2c1e';
     const COLOR_EMBER = '#d9803f';
     const COLOR_EMBER_DIM = '#8a5227';
@@ -1698,12 +1723,17 @@
     // spezzata: qui vanno mostrati come un unico blocco, mai segmentati.
     // Le chat salvate non impostano msgType (undefined): comportamento
     // invariato, sempre segmentate come prima.
-    function buildSpeechBubbles(text, singleBlock) {
+    //
+    // textColor (msg.msgColor, live only): stesso colore con cui lot
+    // renderizza quel preciso messaggio (es. rosso per un'azione da
+    // master) invece del grigio-chiaro fisso di COLOR_TEXT.
+    function buildSpeechBubbles(text, singleBlock, textColor) {
       const bubbles = document.createElement('div');
+      const color = textColor || COLOR_TEXT;
       if (singleBlock) {
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`,
+          `background:${COLOR_SURFACE}`, `color:${color}`, `border:1.5px solid ${COLOR_LINE}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
         ].join(';');
         bubble.textContent = text;
@@ -1715,7 +1745,7 @@
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`,
+          `background:${COLOR_SURFACE}`, `color:${color}`, `border:1.5px solid ${COLOR_LINE}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
@@ -1814,7 +1844,7 @@
         card.appendChild(typeNote);
       }
 
-      card.appendChild(buildSpeechBubbles(msg.testo, msg.msgType === 'azione'));
+      card.appendChild(buildSpeechBubbles(msg.testo, msg.msgType === 'azione', msg.msgColor));
 
       return card;
     }
@@ -1979,7 +2009,11 @@
       ])
         .then(([pgRecords, mappa]) => {
           liveMappa = mappa;
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView });
+          // Letto ad ogni rebuild (non una volta sola): se l'utente cambia
+          // tema chiaro/notturno su lot a metà sessione, la scena lo segue
+          // al prossimo messaggio senza bisogno di ricaricare la pagina.
+          const lotBgColor = getComputedStyle(liveContainer).backgroundColor;
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, lotBgColor });
           rebuildScene();
         })
         .catch((err) => {
