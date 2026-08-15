@@ -459,12 +459,11 @@
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
     // server per questi messaggi, quindi niente speaker via link ARMInew26)
     // e con link ai certificati reali (target="new", univoco per questo
-    // tipo di messaggio). È esattamente l'equivalente testuale della card
-    // "Indosso" che il viewer già mostra cliccando il PG: ridondante in
-    // timeline, non solo "senza parlante" — va scartata, non degradata a
-    // "Sistema". Stesso filtro (presenza di href) già usato da lot-mcp per
-    // escluderla dalle stringhe PG.
-    if (wrap.querySelector('a[target="new"]')) return null;
+    // tipo di messaggio). Niente icona razza non vuol dire niente parlante:
+    // il nome è comunque il primo token del testo ("NICK  - Al suo
+    // arrivo, ha indosso, ..."), recuperato più sotto come fallback quando
+    // speakerFromTavernaBlock non trova nulla.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
 
     const oraEl = wrap.querySelector('span.msg-ora');
     const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
@@ -477,7 +476,13 @@
     // che non lo impostano, continuano a essere sempre spezzate come prima).
     const msgType = el.classList.contains('msg-azione') ? 'azione' : 'normale';
 
-    const speaker = speakerFromTavernaBlock(wrap);
+    let speaker = speakerFromTavernaBlock(wrap);
+    if (!speaker && isEquipDeclaration) {
+      const raw = wrap.textContent.replace(/\s+/g, ' ').trim();
+      const withoutTime = time ? raw.replace(/^\d{2}:\d{2}\s*/, '') : raw;
+      const m = withoutTime.match(/^(.+?)\s+-\s+/);
+      if (m) speaker = m[1].trim();
+    }
 
     const razzaImg = wrap.querySelector('img.msg-razza');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
