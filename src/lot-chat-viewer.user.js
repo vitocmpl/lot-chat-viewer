@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.55
+// @version      0.0.56
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -819,8 +819,12 @@
     return 'https://www.extremelot.eu/lotnew/img/razze/' + razza.toUpperCase() + (sesso === 'Femmina' ? 'F' : 'M') + '.gif';
   }
 
-  // Avatar della card: censo reale (stemma) se disponibile, altrimenti
-  // iniziale del nome su sfondo colore-identità.
+  // Avatar della card: censo reale (stemma) se disponibile; altrimenti,
+  // per un parlante non riconosciuto (msg.unsupportedType — es. un drago:
+  // niente link avatar nel DOM, lot nasconde apposta il vero PG dietro la
+  // mutaforma, non risalibile), l'icona razza del messaggio stesso se
+  // presente (pg.iconUrl, vedi placeholder in draw()) invece di un badge
+  // muto; solo come ultima risorsa l'iniziale del nome su sfondo colore.
   function fillAvatar(el, pg) {
     el.innerHTML = '';
     if (pg.censoUrl) {
@@ -830,6 +834,14 @@
       img.alt = '';
       img.draggable = false;
       img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      el.appendChild(img);
+    } else if (pg.iconUrl) {
+      el.style.background = pgAccentColor(pg.nome);
+      const img = document.createElement('img');
+      img.src = pg.iconUrl;
+      img.alt = '';
+      img.draggable = false;
+      img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
       el.appendChild(img);
     } else {
       el.style.background = pgAccentColor(pg.nome);
@@ -1990,6 +2002,7 @@
         // meglio una card degradata che farla sparire dalla timeline.
         const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
           nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+          iconUrl: msg.razzaIcon || null,
         };
         sidebarList.appendChild(
           i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
