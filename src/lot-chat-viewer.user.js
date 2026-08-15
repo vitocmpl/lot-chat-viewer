@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.58
+// @version      0.0.59
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -399,11 +399,15 @@
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
-    // Il grassetto è l'equivalente, in questo renderer, del tipo '+'
-    // (azione) della chat live — nessun altro segnale nel markup per
-    // distinguerlo da un messaggio normale: stessa regola invert/bordo di
-    // buildSpeechBubbles, vedi msgType lì sotto e in parseTavernaMsgEl.
-    const msgType = msgStyle.bold ? 'azione' : 'normale';
+    // NON impostare msgType da msgStyle.bold: provato (il grassetto sembrava
+    // l'equivalente del tipo '+' live), ma i due soli esempi verificati
+    // (Vivia, un drago) erano entrambi narrazioni lunghe — probabile che il
+    // grassetto sia solo lo stile di default di QUALSIASI messaggio in
+    // questo renderer, non un segnale di tipo. Risultato: invertiva anche i
+    // messaggi normali. msgType resta undefined qui (comportamento originale,
+    // sempre split non invertito) finché non c'è un esempio reale di
+    // messaggio sicuramente normale da confrontare. Bordo/spessore da
+    // msgColor/msgBold restano invece corretti, non dipendono da msgType.
     const speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
@@ -473,7 +477,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      unsupportedType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
