@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.51
+// @version      0.0.52
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -342,13 +342,19 @@
       if (stack.length) stack[stack.length - 1].buf += ch;
       else outside += ch;
     }
+    // Delimitatore rimasto aperto (spaiato, es. un « dimenticato a fine
+    // battuta): l'intento del giocatore era comunque "questo è azione", non
+    // "questo è tornato ad essere parlato" — si tratta come se si fosse
+    // chiuso lì, un solo fumetto invece di ributtarlo fuori come testo
+    // semplice (che gli darebbe lo stile/tipo sbagliato).
     while (stack.length > 1) {
       const inner = stack.pop();
       stack[stack.length - 1].buf += inner.open + inner.buf;
     }
     if (stack.length) {
       const last = stack.pop();
-      outside += last.open + last.buf;
+      const inner = last.buf.trim();
+      if (inner) pages.push({ type: insideType, content: inner });
     }
     flushOutside();
     return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
