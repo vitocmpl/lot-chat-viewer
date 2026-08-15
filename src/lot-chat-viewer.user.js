@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.60
+// @version      0.0.61
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -367,6 +367,16 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // Etichetta di fallback quando non c'è alcun link avatar (un vero PG dei
+  // draghi non lo espone mai, di proposito: nessun modo di risalire al
+  // giocatore reale dietro la mutaforma) — se l'icona razza del messaggio è
+  // comunque quella dei draghi, meglio un'etichetta specifica di quel
+  // generico "Sistema" condiviso con dado/moderazione/sussurro, anche se
+  // resta comunque un nome inventato, non il vero nome del drago.
+  function fallbackSpeakerLabel(razzaIcon) {
+    return razzaIcon && /\/razze\/draghi/i.test(razzaIcon) ? 'Drago' : 'Sistema';
+  }
+
   // Stile "del messaggio" nel renderer di chat_salvate: qui non ci sono
   // span con CSS inline come in chat_taverne, ma <FONT COLOR="..."> vecchio
   // stile che avvolge nick+testo interi (un solo font per messaggio, oltre
@@ -478,7 +488,7 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
       unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
@@ -644,7 +654,7 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
       unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
