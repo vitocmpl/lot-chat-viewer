@@ -62,9 +62,10 @@ Replay funzionante di una chat salvata:
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
 - Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro — mai visti su una chat reale finora) restano visibili con una nota, invece di sparire in silenzio
 
+Modalità chat **live** (`chat_taverne.asp`): implementata, non ancora validata in una sessione di gioco reale. Sostituisce solo l'area messaggi (`#chat-messages`), lascia intatti toolbar e barra di scrittura — lo script resta sola lettura anche lì. La scena si aggiorna da sola quando arrivano nuovi messaggi (segue sempre l'ultimo, come uno scroll che si autoaggiorna); zoom e posizione sulla mappa restano quelli scelti dall'utente da un aggiornamento all'altro.
+
 Non ancora presente:
 
-- Modalità chat **live** (solo chat salvate, per ora)
 - Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
 - Selettore di luogo/chat (qui non serve: la chat è già quella aperta nella pagina)
 
