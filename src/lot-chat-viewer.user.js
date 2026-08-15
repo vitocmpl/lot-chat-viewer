@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.59
+// @version      0.0.60
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -399,21 +399,23 @@
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
-    // NON impostare msgType da msgStyle.bold: provato (il grassetto sembrava
-    // l'equivalente del tipo '+' live), ma i due soli esempi verificati
-    // (Vivia, un drago) erano entrambi narrazioni lunghe — probabile che il
-    // grassetto sia solo lo stile di default di QUALSIASI messaggio in
-    // questo renderer, non un segnale di tipo. Risultato: invertiva anche i
-    // messaggi normali. msgType resta undefined qui (comportamento originale,
-    // sempre split non invertito) finché non c'è un esempio reale di
-    // messaggio sicuramente normale da confrontare. Bordo/spessore da
-    // msgColor/msgBold restano invece corretti, non dipendono da msgType.
     const speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
     const stemmaImg = wrap.querySelector('img[src*="/stemmi/"]');
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
+
+    // Segnale giusto per il tipo, trovato confrontando esempi reali (non il
+    // grassetto, sempre presente sul nick anche nei messaggi normali): lo
+    // stemma (censoUrl) compare SOLO nei messaggi normali ('N') — stessa
+    // regola del client live, dove renderStemma() viene chiamato solo per
+    // 'N' e mai per '+'/'S'/'6'. Un drago (nessuna icona speaker, nessuno
+    // stemma) ricade quindi correttamente su 'azione', non 'normale'. La
+    // dichiarazione oggetti ("Certifica Possesso") resta riconoscibile
+    // dagli stessi link con target="new" già usati in parseTavernaMsgEl.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
 
     const coordSpan = wrap.querySelector('span.msg-pos-tag');
     const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
@@ -477,7 +479,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
