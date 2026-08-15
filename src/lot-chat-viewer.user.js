@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.56
+// @version      0.0.57
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -370,15 +370,21 @@
   // Stile "del messaggio" nel renderer di chat_salvate: qui non ci sono
   // span con CSS inline come in chat_taverne, ma <FONT COLOR="..."> vecchio
   // stile che avvolge nick+testo interi (un solo font per messaggio, oltre
-  // a quello grigio #606060 del timestamp — quest'ultimo va escluso). Il
-  // grassetto è un <b> dentro quel font, non un font-weight calcolato:
-  // basta verificarne la presenza. L'attributo color è già una stringa
-  // hex letterale (nessuna CSS var() da risolvere qui), leggibile anche da
-  // un nodo clonato scollegato — a differenza di resolveMsgStyle (chat
-  // live) non serve leggerlo dall'originale ancora agganciato al documento.
-  function resolveSalvataMsgStyle(wrap) {
-    const colorFont = Array.from(wrap.querySelectorAll('font[color]'))
-      .find((f) => (f.getAttribute('color') || '').toUpperCase() !== '#606060');
+  // a quello del timestamp — quest'ultimo va escluso). Il timestamp NON si
+  // riconosce dal suo colore (#606060): alcuni messaggi — es. un drago in
+  // mutaforma — usano lo stesso grigio anche per il proprio font di
+  // contenuto, un font DIVERSO ma dello stesso colore. Va escluso per
+  // identità del nodo (il clone di timeFont passato da parseBlock), non
+  // per valore — altrimenti si perdono colore/grassetto proprio sui
+  // messaggi che più ne avrebbero bisogno per distinguersi da un vero
+  // messaggio di sistema. Il grassetto è un <b> dentro quel font, non un
+  // font-weight calcolato: basta verificarne la presenza. L'attributo
+  // color è già una stringa hex letterale (nessuna CSS var() da risolvere
+  // qui), leggibile anche da un nodo clonato scollegato — a differenza di
+  // resolveMsgStyle (chat live) non serve leggerlo dall'originale ancora
+  // agganciato al documento.
+  function resolveSalvataMsgStyle(wrap, timeFontClone) {
+    const colorFont = Array.from(wrap.querySelectorAll('font[color]')).find((f) => f !== timeFontClone);
     if (!colorFont) return { color: null, bold: false };
     return { color: colorFont.getAttribute('color'), bold: !!colorFont.querySelector('b') };
   }
@@ -388,10 +394,16 @@
     const time = timeMatch ? timeMatch[1] : null;
 
     const wrap = baseDoc.createElement('div');
-    wrap.appendChild(timeFont.cloneNode(true));
+    const timeFontClone = timeFont.cloneNode(true);
+    wrap.appendChild(timeFontClone);
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
-    const msgStyle = resolveSalvataMsgStyle(wrap);
+    const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
+    // Il grassetto è l'equivalente, in questo renderer, del tipo '+'
+    // (azione) della chat live — nessun altro segnale nel markup per
+    // distinguerlo da un messaggio normale: stessa regola invert/bordo di
+    // buildSpeechBubbles, vedi msgType lì sotto e in parseTavernaMsgEl.
+    const msgType = msgStyle.bold ? 'azione' : 'normale';
     const speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
@@ -456,7 +468,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
