@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.44
+// @version      0.0.45
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -455,9 +455,27 @@
   function parseTavernaMsgEl(el) {
     const wrap = el.cloneNode(true);
 
+    // "Certifica oggetti in gioco": stringa automatica generata dal comando
+    // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
+    // server per questi messaggi, quindi niente speaker via link ARMInew26)
+    // e con link ai certificati reali (target="new", univoco per questo
+    // tipo di messaggio). È esattamente l'equivalente testuale della card
+    // "Indosso" che il viewer già mostra cliccando il PG: ridondante in
+    // timeline, non solo "senza parlante" — va scartata, non degradata a
+    // "Sistema". Stesso filtro (presenza di href) già usato da lot-mcp per
+    // escluderla dalle stringhe PG.
+    if (wrap.querySelector('a[target="new"]')) return null;
+
     const oraEl = wrap.querySelector('span.msg-ora');
     const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
     const time = timeMatch ? timeMatch[1] : null;
+
+    // Tipo '+' (azione): testo già una narrazione continua nel client
+    // reale, colorata invece di spezzata — a differenza del tipo 'N' non va
+    // segmentata in fumetti azione/parlato separati (vedi buildSpeechBubbles
+    // più sotto, che rispetta questo flag solo se presente: le chat salvate,
+    // che non lo impostano, continuano a essere sempre spezzate come prima).
+    const msgType = el.classList.contains('msg-azione') ? 'azione' : 'normale';
 
     const speaker = speakerFromTavernaBlock(wrap);
 
@@ -509,7 +527,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType,
+      unsupportedType, msgType,
     };
   }
 
@@ -1669,8 +1687,24 @@
     // ognuno nel proprio fumetto (bordo tondo per il parlato, squadrato +
     // corsivo per l'azione), leggero rientro laterale per distinguerli
     // anche quando due dello stesso tipo si susseguono.
-    function buildSpeechBubbles(text) {
+    //
+    // I messaggi di tipo '+' (chat live, msg.msgType === 'azione') sono già
+    // una narrazione continua nel client reale — colorata invece di
+    // spezzata: qui vanno mostrati come un unico blocco, mai segmentati.
+    // Le chat salvate non impostano msgType (undefined): comportamento
+    // invariato, sempre segmentate come prima.
+    function buildSpeechBubbles(text, singleBlock) {
       const bubbles = document.createElement('div');
+      if (singleBlock) {
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`,
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
+        ].join(';');
+        bubble.textContent = text;
+        bubbles.appendChild(bubble);
+        return bubbles;
+      }
       const slots = splitSegments(text).map((p) => {
         const slot = document.createElement('div');
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
@@ -1775,7 +1809,7 @@
         card.appendChild(typeNote);
       }
 
-      card.appendChild(buildSpeechBubbles(msg.testo));
+      card.appendChild(buildSpeechBubbles(msg.testo, msg.msgType === 'azione'));
 
       return card;
     }
