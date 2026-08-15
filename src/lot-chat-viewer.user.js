@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.57
+// @version      0.0.58
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -450,7 +450,12 @@
     wrap.querySelectorAll(
       'span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, span.msg-tag-med, img, a[href*="avatar.asp"]'
     ).forEach((el) => el.remove());
-    wrap.querySelectorAll('font[color="#606060"]').forEach((el) => el.remove());
+    // Rimuove SOLO il font del timestamp (per identità, stesso motivo di
+    // resolveSalvataMsgStyle sopra) — non "tutti i font grigi": un
+    // messaggio come quello di un drago in mutaforma ha il proprio font di
+    // contenuto anch'esso colorato #606060, e un filtro per colore lo
+    // cancellava insieme al timestamp lasciando il testo vuoto.
+    timeFontClone.remove();
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     if (speaker && testo.startsWith(speaker)) {
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
