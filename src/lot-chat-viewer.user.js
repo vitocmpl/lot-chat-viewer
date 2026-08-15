@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.46
+// @version      0.0.47
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -284,30 +284,38 @@
   // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
   const MED_ICON_URL = 'https://www.extremelot.eu/lotnew/img/tagmedico.png';
 
-  // Spezza una stringa reale nelle sue "pagine" alternate: azione (dentro
-  // «» <> () {} []) e parlato/narrazione (il resto), nell'ordine in cui
-  // compaiono nel testo. I tag [...] di metadato (coordinate/tag modali)
-  // sono già stati rimossi dal parser della chat prima di questa funzione,
-  // quindi qui [...] intercetta solo eventuali parentesi quadre rimaste
-  // dentro al corpo del testo stesso.
-  function splitSegments(text) {
+  // Spezza una stringa reale nelle sue "pagine" alternate: dentro «» <> ()
+  // {} [] e fuori, nell'ordine in cui compaiono nel testo. I tag [...] di
+  // metadato (coordinate/tag modali) sono già stati rimossi dal parser
+  // della chat prima di questa funzione, quindi qui [...] intercetta solo
+  // eventuali parentesi quadre rimaste dentro al corpo del testo stesso.
+  //
+  // Quale dei due sia "azione" e quale "parlato" dipende dal tipo di
+  // messaggio, non è fisso: nei messaggi normali (tipo 'N') il testo fuori
+  // parentesi è il parlato e dentro è l'azione/descrizione; nei messaggi
+  // '+' (azione, chat live) è l'esatto contrario — il client scrive lì
+  // l'azione/narrazione in chiaro e il parlato dentro «»/<>. `invert`
+  // scambia i due significati senza duplicare la logica di parsing.
+  function splitSegments(text, invert) {
     const re = /«[^»]*»|<[^>]*>|\([^)]*\)|\{[^}]*\}|\[[^\]]*\]/g;
+    const outside = invert ? 'action' : 'speech';
+    const inside = invert ? 'speech' : 'action';
     const pages = [];
     let last = 0, m;
     while ((m = re.exec(text))) {
       if (m.index > last) {
         const plain = text.slice(last, m.index).trim();
-        if (plain) pages.push({ type: 'speech', content: plain });
+        if (plain) pages.push({ type: outside, content: plain });
       }
       const inner = m[0].slice(1, -1).trim();
-      if (inner) pages.push({ type: 'action', content: inner });
+      if (inner) pages.push({ type: inside, content: inner });
       last = re.lastIndex;
     }
     if (last < text.length) {
       const tail = text.slice(last).trim();
-      if (tail) pages.push({ type: 'speech', content: tail });
+      if (tail) pages.push({ type: outside, content: tail });
     }
-    return pages.length ? pages : [{ type: 'speech', content: text.trim() }];
+    return pages.length ? pages : [{ type: outside, content: text.trim() }];
   }
 
   function speakerFromBlock(wrap) {
@@ -1718,29 +1726,21 @@
     // corsivo per l'azione), leggero rientro laterale per distinguerli
     // anche quando due dello stesso tipo si susseguono.
     //
-    // I messaggi di tipo '+' (chat live, msg.msgType === 'azione') sono già
-    // una narrazione continua nel client reale — colorata invece di
-    // spezzata: qui vanno mostrati come un unico blocco, mai segmentati.
-    // Le chat salvate non impostano msgType (undefined): comportamento
-    // invariato, sempre segmentate come prima.
+    // I messaggi di tipo '+' (chat live, msg.msgType === 'azione') si
+    // spezzano allo stesso modo dei normali ('N'), ma con i due significati
+    // scambiati: fuori parentesi è l'azione/narrazione (il client la scrive
+    // in chiaro), dentro «»/<>/ecc. è il parlato — esatto opposto di 'N',
+    // dove fuori è il parlato e dentro l'azione. Le chat salvate non
+    // impostano msgType (undefined): invert resta false, comportamento
+    // invariato.
     //
     // textColor (msg.msgColor, live only): stesso colore con cui lot
     // renderizza quel preciso messaggio (es. rosso per un'azione da
     // master) invece del grigio-chiaro fisso di COLOR_TEXT.
-    function buildSpeechBubbles(text, singleBlock, textColor) {
+    function buildSpeechBubbles(text, invert, textColor) {
       const bubbles = document.createElement('div');
       const color = textColor || COLOR_TEXT;
-      if (singleBlock) {
-        const bubble = document.createElement('div');
-        bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${color}`, `border:1.5px solid ${COLOR_LINE}`,
-          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
-        ].join(';');
-        bubble.textContent = text;
-        bubbles.appendChild(bubble);
-        return bubbles;
-      }
-      const slots = splitSegments(text).map((p) => {
+      const slots = splitSegments(text, invert).map((p) => {
         const slot = document.createElement('div');
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
