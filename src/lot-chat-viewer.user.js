@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.52
+// @version      0.0.53
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -60,10 +60,16 @@
   });
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
+  banner.textContent = 'lot-chat-viewer by Alderick — clicca per mostrare/nascondere';
   banner.title = 'Mostra/nascondi la scena';
+  // In live, #chat-messages parte da y≈0 dentro l'iframe (nessun header
+  // sopra): a top:8px il banner si sovrappone sia al testo originale di
+  // lot (a scena nascosta) sia al nostro navigatore messaggi (a scena
+  // visibile). Spostato più in alto in quel caso — in replay resta dov'era,
+  // lì sotto a title/subtitle c'è già margine naturale.
+  const bannerTop = isLive ? '-32px' : '8px';
   banner.style.cssText = [
-    'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
+    'position:fixed', `top:${bannerTop}`, 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace', 'cursor:pointer',
     'padding:6px 10px', 'border-radius:4px', 'opacity:0.85',
   ].join(';');
