@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.48
+// @version      0.0.49
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -495,12 +495,13 @@
     const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
     const time = timeMatch ? timeMatch[1] : null;
 
-    // Tipo '+' (azione): testo già una narrazione continua nel client
-    // reale, colorata invece di spezzata — a differenza del tipo 'N' non va
-    // segmentata in fumetti azione/parlato separati (vedi buildSpeechBubbles
-    // più sotto, che rispetta questo flag solo se presente: le chat salvate,
-    // che non lo impostano, continuano a essere sempre spezzate come prima).
-    const msgType = el.classList.contains('msg-azione') ? 'azione' : 'normale';
+    // 'equip' (dichiarazione oggetti): un elenco fitto di nomi separati da
+    // virgole, spezzarlo con la stessa regex azione/parlato non avrebbe
+    // senso (non c'è alcuna azione/parlato lì dentro) — un blocco unico.
+    // 'azione' (tipo '+'): si spezza come 'N' ma con i significati
+    // invertiti (vedi buildSpeechBubbles). 'normale' ('N' e chat salvate):
+    // comportamento invariato.
+    const msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
 
     let speaker = speakerFromTavernaBlock(wrap);
     if (!speaker && isEquipDeclaration) {
@@ -811,17 +812,12 @@
 
     // Layout a schermo intero, due colonne (mappa | timeline) — senza una
     // toolbar di selezione in alto: qui la chat è già quella aperta nella
-    // pagina, non c'è nulla da scegliere.
-    // In live, sfondo pannello e sfondo delle card/fumetti seguono lo
-    // stesso sfondo che #chat-messages ha in quel momento su lot (letto via
-    // getComputedStyle prima del rebuild — vedi opts.lotBgColor più sotto),
-    // invece del bordeaux scuro inventato per il replay: coerenza visiva
-    // con la chat reale, chiaro o notturno a seconda di cosa l'utente ha
-    // già scelto su lot.
-    const LOT_BG = mode === 'live' ? opts.lotBgColor : null;
-    const COLOR_BG = LOT_BG || '#120f0c';
-    const COLOR_SURFACE = LOT_BG || '#1c1610';
-    const COLOR_SURFACE2 = LOT_BG || '#281f16';
+    // pagina, non c'è nulla da scegliere. Palette propria del viewer, fissa
+    // per entrambe le modalità (replay e live) — provato a inseguire i
+    // colori/sfondo reali di lot, resa peggiore: si torna alla nostra.
+    const COLOR_BG = '#120f0c';
+    const COLOR_SURFACE = '#1c1610';
+    const COLOR_SURFACE2 = '#281f16';
     const COLOR_LINE = '#3a2c1e';
     const COLOR_EMBER = '#d9803f';
     const COLOR_EMBER_DIM = '#8a5227';
@@ -1724,7 +1720,9 @@
     // Segmenti «azione»/parlato impilati in verticale,
     // ognuno nel proprio fumetto (bordo tondo per il parlato, squadrato +
     // corsivo per l'azione), leggero rientro laterale per distinguerli
-    // anche quando due dello stesso tipo si susseguono.
+    // anche quando due dello stesso tipo si susseguono. Palette sempre
+    // quella del viewer (COLOR_SURFACE/COLOR_TEXT), non quella del
+    // messaggio originale su lot.
     //
     // I messaggi di tipo '+' (chat live, msg.msgType === 'azione') si
     // spezzano allo stesso modo dei normali ('N'), ma con i due significati
@@ -1734,18 +1732,34 @@
     // impostano msgType (undefined): invert resta false, comportamento
     // invariato.
     //
-    // textColor (msg.msgColor, live only): stesso colore con cui lot
-    // renderizza quel preciso messaggio (es. rosso per un'azione da
-    // master) invece del grigio-chiaro fisso di COLOR_TEXT.
-    function buildSpeechBubbles(text, invert, textColor) {
+    // borderColor (msg.msgColor, solo per i '+'): non tocchiamo più
+    // sfondo/testo del fumetto (resa peggiore, si torna alla palette del
+    // viewer), ma il bordo sì — evidenzia a colpo d'occhio i messaggi
+    // azione col colore reale con cui li mostra lot, rosso di un master
+    // compreso, senza confondersi con quelli normali (bordo neutro COLOR_LINE).
+    //
+    // singleBlock (msg.msgType === 'equip'): dichiarazione oggetti, un
+    // elenco di nomi senza alcuna azione/parlato al suo interno — un unico
+    // blocco, niente split.
+    function buildSpeechBubbles(text, invert, borderColor, singleBlock) {
       const bubbles = document.createElement('div');
-      const color = textColor || COLOR_TEXT;
+      const border = borderColor || COLOR_LINE;
+      if (singleBlock) {
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
+        ].join(';');
+        bubble.textContent = text;
+        bubbles.appendChild(bubble);
+        return bubbles;
+      }
       const slots = splitSegments(text, invert).map((p) => {
         const slot = document.createElement('div');
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${color}`, `border:1.5px solid ${COLOR_LINE}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
@@ -1844,7 +1858,12 @@
         card.appendChild(typeNote);
       }
 
-      card.appendChild(buildSpeechBubbles(msg.testo, msg.msgType === 'azione', msg.msgColor));
+      card.appendChild(buildSpeechBubbles(
+        msg.testo,
+        msg.msgType === 'azione',
+        msg.msgType === 'azione' ? msg.msgColor : null,
+        msg.msgType === 'equip'
+      ));
 
       return card;
     }
@@ -2009,17 +2028,13 @@
       ])
         .then(([pgRecords, mappa]) => {
           liveMappa = mappa;
-          // Letto ad ogni rebuild (non una volta sola): se l'utente cambia
-          // tema chiaro/notturno su lot a metà sessione, la scena lo segue
-          // al prossimo messaggio senza bisogno di ricaricare la pagina.
-          const lotBgColor = getComputedStyle(liveContainer).backgroundColor;
           // rebuildScene va sempre riassegnata ai dati appena risolti, anche
           // a scena nascosta (banner spento, utente sulla vista originale
           // di lot): altrimenti il banner "mostra" richiamerebbe la
           // versione ferma all'ultimo momento in cui era visibile, perdendo
           // tutti i messaggi arrivati nel frattempo. Si evita solo di
           // toccare il DOM adesso se non è comunque visibile.
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, lotBgColor });
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView });
           if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
