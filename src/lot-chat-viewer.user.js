@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.62
+// @version      0.0.63
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1977,11 +1977,17 @@
         card.appendChild(typeNote);
       }
 
+      // Bordo colorato solo su azione/equip: sui messaggi 'N' c'è sempre un
+      // colore disponibile (quello del nick, es. Vivia rosso anche nei suoi
+      // messaggi normali) ma applicarlo lì renderebbe TUTTO evidenziato,
+      // l'opposto del "richiamo leggero, solo sui messaggi che spiccano già
+      // su lot" che era la richiesta originale.
+      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        msg.msgColor,
-        msg.msgBold,
+        isStyledType ? msg.msgColor : null,
+        isStyledType ? msg.msgBold : false,
         msg.msgType === 'equip'
       ));
 
