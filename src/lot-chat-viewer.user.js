@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.54
+// @version      0.0.55
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -367,6 +367,22 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // Stile "del messaggio" nel renderer di chat_salvate: qui non ci sono
+  // span con CSS inline come in chat_taverne, ma <FONT COLOR="..."> vecchio
+  // stile che avvolge nick+testo interi (un solo font per messaggio, oltre
+  // a quello grigio #606060 del timestamp — quest'ultimo va escluso). Il
+  // grassetto è un <b> dentro quel font, non un font-weight calcolato:
+  // basta verificarne la presenza. L'attributo color è già una stringa
+  // hex letterale (nessuna CSS var() da risolvere qui), leggibile anche da
+  // un nodo clonato scollegato — a differenza di resolveMsgStyle (chat
+  // live) non serve leggerlo dall'originale ancora agganciato al documento.
+  function resolveSalvataMsgStyle(wrap) {
+    const colorFont = Array.from(wrap.querySelectorAll('font[color]'))
+      .find((f) => (f.getAttribute('color') || '').toUpperCase() !== '#606060');
+    if (!colorFont) return { color: null, bold: false };
+    return { color: colorFont.getAttribute('color'), bold: !!colorFont.querySelector('b') };
+  }
+
   function parseBlock(timeFont, restNodes, baseDoc) {
     const timeMatch = timeFont.textContent.match(/(\d{2}:\d{2})/);
     const time = timeMatch ? timeMatch[1] : null;
@@ -375,6 +391,7 @@
     wrap.appendChild(timeFont.cloneNode(true));
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
+    const msgStyle = resolveSalvataMsgStyle(wrap);
     const speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
@@ -439,7 +456,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType,
+      unsupportedType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -502,7 +519,7 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
-  // Colore "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
+  // Stile "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
   // il client avvolge tutto (nick+testo) in un unico <span style="color:
   // ...">, spesso personalizzato (es. rosso per i master) — è quello lo
   // span da leggere, non il nick. Il tipo 'N' non ha un colore proprio per
@@ -511,16 +528,20 @@
   // già le CSS var() (--testo-msg ecc.) al valore rgb() reale corrente —
   // ma solo su un nodo ancora agganciato al documento, mai su un clone
   // scollegato: va chiamato PRIMA di clonare l'elemento in parseTavernaMsgEl.
-  function resolveMsgColor(el) {
+  // bold: font-weight ereditato dallo stesso span (es. .msg-azione è
+  // bold via CSS di classe, non inline — getComputedStyle lo risolve lo
+  // stesso perché il nodo è ancora nel documento).
+  function resolveMsgStyle(el) {
     const bodySpan = Array.from(el.children).find((c) => (
       c.tagName === 'SPAN' && c.style && c.style.color
       && !c.classList.contains('msg-ora') && !c.classList.contains('msg-nick')
     ));
-    return getComputedStyle(bodySpan || el).color || null;
+    const cs = getComputedStyle(bodySpan || el);
+    return { color: cs.color || null, bold: parseInt(cs.fontWeight, 10) >= 700 };
   }
 
   function parseTavernaMsgEl(el) {
-    const msgColor = resolveMsgColor(el);
+    const msgStyle = resolveMsgStyle(el);
     const wrap = el.cloneNode(true);
 
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
@@ -601,7 +622,7 @@
 
     return {
       time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType, msgColor,
+      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -1774,22 +1795,26 @@
     // impostano msgType (undefined): invert resta false, comportamento
     // invariato.
     //
-    // borderColor (msg.msgColor, solo per i '+'): non tocchiamo più
-    // sfondo/testo del fumetto (resa peggiore, si torna alla palette del
-    // viewer), ma il bordo sì — evidenzia a colpo d'occhio i messaggi
-    // azione col colore reale con cui li mostra lot, rosso di un master
-    // compreso, senza confondersi con quelli normali (bordo neutro COLOR_LINE).
+    // borderColor/borderBold (msg.msgColor/msg.msgBold, sempre — replay e
+    // live): non tocchiamo più sfondo/testo del fumetto (resa peggiore, si
+    // torna alla palette del viewer), ma il bordo sì, sempre col colore
+    // reale con cui lot mostra quel preciso messaggio — rosso di un master
+    // compreso — invece del neutro COLOR_LINE fisso. Un bordo più spesso
+    // quando lot lo mostra in grassetto (es. .msg-azione in live, <b> in
+    // replay): stesso "richiamo" allo stile originale, ma solo sul bordo —
+    // meno invasivo di copiare anche sfondo/font, resta leggibile.
     //
     // singleBlock (msg.msgType === 'equip'): dichiarazione oggetti, un
     // elenco di nomi senza alcuna azione/parlato al suo interno — un unico
     // blocco, niente split.
-    function buildSpeechBubbles(text, invert, borderColor, singleBlock) {
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
+      const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
         ].join(';');
         bubble.textContent = text;
@@ -1801,7 +1826,7 @@
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
@@ -1903,7 +1928,8 @@
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        (msg.msgType === 'azione' || msg.msgType === 'equip') ? msg.msgColor : null,
+        msg.msgColor,
+        msg.msgBold,
         msg.msgType === 'equip'
       ));
 
