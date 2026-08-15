@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.63
+// @version      0.0.64
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -265,6 +265,47 @@
     return el.value;
   }
 
+  // Cammina i nodi di un elemento (già ripulito da chrome/tag/img) e ne
+  // ricava una sequenza piatta di testo/link, nell'ordine in cui compaiono
+  // — usata per i messaggi "Certifica Possesso in Gioco" (msgType 'equip'),
+  // dove ogni oggetto dichiarato è un <a href target="new"> reale verso il
+  // certificato: leggerne solo il textContent (come per ogni altro
+  // messaggio) perderebbe quei link, lasciando solo i nomi come testo
+  // piatto. Nodi diversi da testo/<a> (es. <b>/<small>, wrapper di stile
+  // senza significato proprio) vengono attraversati in trasparenza, non
+  // prodotti come run a sé.
+  function extractRichRuns(containerEl) {
+    const runs = [];
+    function walk(node) {
+      if (node.nodeType === 3) {
+        if (node.textContent) runs.push({ type: 'text', value: node.textContent });
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === 'A') {
+        const text = node.textContent;
+        if (text) runs.push({ type: 'link', text, href: node.getAttribute('href') });
+        return;
+      }
+      Array.from(node.childNodes).forEach(walk);
+    }
+    Array.from(containerEl.childNodes).forEach(walk);
+    return runs;
+  }
+
+  // Il nome resta incollato dentro il primo run di testo (nessun nodo
+  // dedicato lo isola nei messaggi 'equip') — stesso taglio già fatto su
+  // "testo" altrove, qui applicato al primo run invece che a una stringa.
+  function stripSpeakerPrefixFromRuns(runs, speaker) {
+    if (!speaker || !runs.length || runs[0].type !== 'text') return runs;
+    const idx = runs[0].value.indexOf(speaker);
+    if (idx === -1 || idx > 5) return runs;
+    const rest = runs[0].value.slice(idx + speaker.length).replace(/^\s*-?\s+/, '');
+    const out = runs.slice(1);
+    if (rest) out.unshift({ type: 'text', value: rest });
+    return out;
+  }
+
   function isGreyTimestampFont(node) {
     return node.nodeType === 1 && node.tagName === 'FONT'
       && (node.getAttribute('color') || '').toUpperCase() === '#606060'
@@ -413,6 +454,10 @@
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    // Link reale che lot mette sull'icona razza (avatar.asp?id=NICK) — un
+    // drago non ce l'ha (icona senza <a>, coerente con niente speaker).
+    const razzaLinkEl = razzaImg ? razzaImg.closest('a') : null;
+    const razzaLink = razzaLinkEl ? razzaLinkEl.getAttribute('href') : null;
     const stemmaImg = wrap.querySelector('img[src*="/stemmi/"]');
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
 
@@ -472,6 +517,12 @@
     // contenuto anch'esso colorato #606060, e un filtro per colore lo
     // cancellava insieme al timestamp lasciando il testo vuoto.
     timeFontClone.remove();
+    // Per 'equip' (certifica oggetti): estratta PRIMA di appiattire a testo
+    // — a quel punto wrap contiene solo testo + i veri <a target="new">
+    // verso i certificati, niente altro chrome. Il primo run è sempre il
+    // nome (nessun nodo separato lo isola da qui), tolto sotto come per il
+    // prefisso testuale di "testo".
+    const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     if (speaker && testo.startsWith(speaker)) {
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
@@ -488,8 +539,8 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -609,6 +660,11 @@
 
     const razzaImg = wrap.querySelector('img.msg-razza');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    // Link reale che lot mette sull'icona razza (javascript:void(window.
+    // open('../ARMInew26.asp?ID=NICK...'))) — un drago non ce l'ha (icona
+    // senza <a>, coerente con niente speaker).
+    const razzaLinkEl = razzaImg ? razzaImg.closest('a') : null;
+    const razzaLink = razzaLinkEl ? razzaLinkEl.getAttribute('href') : null;
     const stemmaImg = wrap.querySelector('img.msg-stemma');
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
 
@@ -638,6 +694,10 @@
     wrap.querySelectorAll(
       'span.msg-ora, span.msg-nick, span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, img'
     ).forEach((n) => n.remove());
+    // Per 'equip' (certifica oggetti): estratta PRIMA di appiattire a testo
+    // — a quel punto wrap contiene solo testo + i veri <a target="new">
+    // verso i certificati, niente altro chrome.
+    const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     // Per azione/skill/dado il nick (con eventuale "carica" davanti) resta
     // incollato dentro il testo — .msg-nick esiste solo per i messaggi
@@ -654,8 +714,8 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -1851,8 +1911,11 @@
     //
     // singleBlock (msg.msgType === 'equip'): dichiarazione oggetti, un
     // elenco di nomi senza alcuna azione/parlato al suo interno — un unico
-    // blocco, niente split.
-    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock) {
+    // blocco, niente split. richRuns (msg.equipRuns), se presente: gli
+    // oggetti dichiarati sono link reali verso i certificati (stesso
+    // meccanismo della card "Indosso" già cliccabile) — resi come <a>
+    // veri invece di testo piatto, `text` resta il fallback se assente.
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
       const borderWidth = borderBold ? '3px' : '1.5px';
@@ -1862,7 +1925,23 @@
           `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
         ].join(';');
-        bubble.textContent = text;
+        if (richRuns && richRuns.length) {
+          richRuns.forEach((run) => {
+            if (run.type === 'link') {
+              const a = document.createElement('a');
+              a.href = run.href;
+              a.target = 'new';
+              a.rel = 'noopener';
+              a.textContent = run.text;
+              a.style.cssText = `color:${COLOR_EMBER};text-decoration:underline;`;
+              bubble.appendChild(a);
+            } else {
+              bubble.appendChild(document.createTextNode(run.value));
+            }
+          });
+        } else {
+          bubble.textContent = text;
+        }
         bubbles.appendChild(bubble);
         return bubbles;
       }
@@ -1912,7 +1991,20 @@
         raceIcon.alt = '';
         raceIcon.draggable = false;
         raceIcon.style.cssText = 'width:10px;height:10px;flex:0 0 auto;';
-        header.appendChild(raceIcon);
+        // Link reale che lot mette sulla sua icona razza in questo preciso
+        // messaggio (scheda PG in live, avatar.asp in replay) — un drago
+        // non ce l'ha, l'icona resta senza link in quel caso.
+        if (msg.razzaLink) {
+          const raceLink = document.createElement('a');
+          raceLink.href = msg.razzaLink;
+          raceLink.target = '_blank';
+          raceLink.rel = 'noopener';
+          raceLink.style.cssText = 'flex:0 0 auto;line-height:0;';
+          raceLink.appendChild(raceIcon);
+          header.appendChild(raceLink);
+        } else {
+          header.appendChild(raceIcon);
+        }
       }
 
       // Tag modali prima della coordinata di griglia: stesso ordine del
@@ -1988,7 +2080,8 @@
         msg.msgType === 'azione',
         isStyledType ? msg.msgColor : null,
         isStyledType ? msg.msgBold : false,
-        msg.msgType === 'equip'
+        msg.msgType === 'equip',
+        msg.equipRuns
       ));
 
       return card;
