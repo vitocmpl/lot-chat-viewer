@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.61
+// @version      0.0.62
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1964,8 +1964,15 @@
         card.appendChild(gapNote);
       }
       if (msg.unsupportedType) {
+        // Un drago è "non riconosciuto" solo nel senso che lot non espone
+        // mai il giocatore reale dietro la mutaforma (per design, non un
+        // limite del parser) — nota diversa da quella generica di sistema/
+        // dado/sussurro, che invece è un vero parlante non identificato.
+        const isDrago = fallbackSpeakerLabel(msg.razzaIcon) === 'Drago';
         const typeNote = document.createElement('div');
-        typeNote.textContent = 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
+        typeNote.textContent = isDrago
+          ? 'Drago: lot non espone il giocatore reale dietro la mutaforma — nessun PG collegabile.'
+          : 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
         typeNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
         card.appendChild(typeNote);
       }
