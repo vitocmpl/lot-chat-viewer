@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.43
+// @version      0.0.54
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
+// @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
 // @run-at       document-idle
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/vitocmpl/lot-chat-viewer/main/src/lot-chat-viewer.user.js
@@ -32,6 +33,14 @@
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
 
+  // Due sorgenti di chat, due DOM completamente diversi: chat_salvate.asp è
+  // un transcript statico (.lot-chat), chat_taverne.asp è la chat live con
+  // messaggi già impaginati da ChatTaverne.renderMessage() dentro
+  // #chat-messages e un pannello di input/toolbar che qui NON va toccato
+  // (sola lettura anche qui: si sostituisce solo l'area messaggi, mai
+  // #chat-toolbar/#chat-input-bar).
+  const isLive = !!document.getElementById('chat-messages');
+
   // Ricostruisce la scena da zero invece di limitarsi a un display:none/''.
   // Riprovato più volte a "patchare" un semplice mostra/nascondi (ricalcolo
   // di altezza/fitScale alla riaccensione): restava comunque disallineato
@@ -51,7 +60,7 @@
   });
 
   const banner = document.createElement('div');
-  banner.textContent = 'lot-chat-viewer — clicca per mostrare/nascondere';
+  banner.textContent = 'lot-chat-viewer by Alderick — clicca per mostrare/nascondere';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
     'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
@@ -62,10 +71,12 @@
     if (sceneVisible) {
       const existing = document.getElementById('lot-chat-viewer-scene');
       if (existing) existing.remove();
-      const originalChat = document.querySelector('.lot-chat');
+      const originalChat = isLive ? document.getElementById('chat-messages') : document.querySelector('.lot-chat');
       if (originalChat) originalChat.style.display = '';
-      const footer = document.querySelector('.lot-footer');
-      if (footer) footer.style.display = '';
+      if (!isLive) {
+        const footer = document.querySelector('.lot-footer');
+        if (footer) footer.style.display = '';
+      }
       sceneVisible = false;
     } else if (rebuildScene) {
       rebuildScene();
@@ -273,30 +284,80 @@
   // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
   const MED_ICON_URL = 'https://www.extremelot.eu/lotnew/img/tagmedico.png';
 
-  // Spezza una stringa reale nelle sue "pagine" alternate: azione (dentro
-  // «» <> () {} []) e parlato/narrazione (il resto), nell'ordine in cui
-  // compaiono nel testo. I tag [...] di metadato (coordinate/tag modali)
-  // sono già stati rimossi dal parser della chat prima di questa funzione,
-  // quindi qui [...] intercetta solo eventuali parentesi quadre rimaste
-  // dentro al corpo del testo stesso.
-  function splitSegments(text) {
-    const re = /«[^»]*»|<[^>]*>|\([^)]*\)|\{[^}]*\}|\[[^\]]*\]/g;
+  // Spezza una stringa reale nelle sue "pagine" alternate: dentro «» <> ()
+  // {} [] e fuori, nell'ordine in cui compaiono nel testo. I tag [...] di
+  // metadato (coordinate/tag modali) sono già stati rimossi dal parser
+  // della chat prima di questa funzione, quindi qui [...] intercetta solo
+  // eventuali parentesi quadre rimaste dentro al corpo del testo stesso.
+  //
+  // Quale dei due sia "azione" e quale "parlato" dipende dal tipo di
+  // messaggio, non è fisso: nei messaggi normali (tipo 'N') il testo fuori
+  // parentesi è il parlato e dentro è l'azione/descrizione; nei messaggi
+  // '+' (azione, chat live) è l'esatto contrario — il client scrive lì
+  // l'azione/narrazione in chiaro e il parlato dentro «»/<>. `invert`
+  // scambia i due significati senza duplicare la logica di parsing.
+  //
+  // Scansione a pila, non una singola regex non-greedy: i testi di gioco
+  // (soprattutto le formule di incantesimo) usano «» sia per le citazioni
+  // di gioco sia per il discorso diretto nello stesso messaggio, spesso
+  // riaprendone uno nuovo prima che il precedente si chiuda — con
+  // `«[^»]*»` (esclude solo » dal contenuto, non «) il primo « "adottava"
+  // tutto fino alla » più lontana invece che alla sua vera coppia,
+  // lasciando bolle spaiate con un solo "»" e testo troncato a metà. Qui un
+  // « annidato apre un nuovo livello; si richiude nel buffer del livello
+  // sopra (delimitatori compresi, nessun carattere perso) solo quando non è
+  // il più esterno — un solo fumetto per il livello più esterno, come
+  // prima. Delimitatori rimasti aperti a fine testo (spaiati, capita nel
+  // testo libero dei giocatori) restano comunque visibili come testo
+  // semplice invece di far sparire tutto quel che segue.
+  function splitSegments(text, invert) {
+    const CLOSE_OF = { '«': '»', '<': '>', '(': ')', '{': '}', '[': ']' };
+    const outsideType = invert ? 'action' : 'speech';
+    const insideType = invert ? 'speech' : 'action';
     const pages = [];
-    let last = 0, m;
-    while ((m = re.exec(text))) {
-      if (m.index > last) {
-        const plain = text.slice(last, m.index).trim();
-        if (plain) pages.push({ type: 'speech', content: plain });
+    let outside = '';
+    const stack = []; // { open, close, buf }
+    const flushOutside = () => {
+      const plain = outside.trim();
+      if (plain) pages.push({ type: outsideType, content: plain });
+      outside = '';
+    };
+    for (const ch of text) {
+      if (stack.length && ch === stack[stack.length - 1].close) {
+        const frame = stack.pop();
+        if (stack.length === 0) {
+          const inner = frame.buf.trim();
+          if (inner) pages.push({ type: insideType, content: inner });
+        } else {
+          stack[stack.length - 1].buf += frame.open + frame.buf + ch;
+        }
+        continue;
       }
-      const inner = m[0].slice(1, -1).trim();
-      if (inner) pages.push({ type: 'action', content: inner });
-      last = re.lastIndex;
+      const close = CLOSE_OF[ch];
+      if (close) {
+        if (stack.length === 0) flushOutside();
+        stack.push({ open: ch, close, buf: '' });
+        continue;
+      }
+      if (stack.length) stack[stack.length - 1].buf += ch;
+      else outside += ch;
     }
-    if (last < text.length) {
-      const tail = text.slice(last).trim();
-      if (tail) pages.push({ type: 'speech', content: tail });
+    // Delimitatore rimasto aperto (spaiato, es. un « dimenticato a fine
+    // battuta): l'intento del giocatore era comunque "questo è azione", non
+    // "questo è tornato ad essere parlato" — si tratta come se si fosse
+    // chiuso lì, un solo fumetto invece di ributtarlo fuori come testo
+    // semplice (che gli darebbe lo stile/tipo sbagliato).
+    while (stack.length > 1) {
+      const inner = stack.pop();
+      stack[stack.length - 1].buf += inner.open + inner.buf;
     }
-    return pages.length ? pages : [{ type: 'speech', content: text.trim() }];
+    if (stack.length) {
+      const last = stack.pop();
+      const inner = last.buf.trim();
+      if (inner) pages.push({ type: insideType, content: inner });
+    }
+    flushOutside();
+    return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
   }
 
   function speakerFromBlock(wrap) {
@@ -419,7 +480,143 @@
     return { locationName, dateLabel, messages };
   }
 
-  const chatParsed = parseChatSalvata(document);
+  // --- Parser: chat live (proc/chat/chat_taverne.asp, #chat-messages) ---
+  // Qui il client reale (chat_taverne.js, ChatTaverne.renderMessage) ha già
+  // impaginato ogni messaggio come un <div class="chat-msg" id="msg-ID">
+  // discreto — niente flusso piatto da riraggruppare come in chat_salvate,
+  // un blocco = un elemento. Il parlante NON si legge da un link
+  // avatar.asp (quello è solo nel renderer delle chat salvate): qui l'icona
+  // razza (img.msg-razza) è avvolta in un <a href="javascript:...
+  // ARMInew26.asp?ID=NICK...">, presente per i tipi N/+/S/6 (non per
+  // moderazione/admin/immagine/fato/sussurro/PNG drago, che restano senza
+  // parlante riconosciuto — stesso trattamento "unsupportedType" già usato
+  // per i blocchi non riconosciuti in chat_salvate, non un buco silenzioso).
+  // I nomi delle classi tag modali (msg-tag-pos/status/arcani/png/fato/
+  // missione, msg-pos-tag) coincidono con quelli già gestiti in parseBlock:
+  // stesso client, stesso set di tag, TAG_KIND_ORDER/decodeEntitiesOnce
+  // riusati as-is.
+  function speakerFromTavernaBlock(el) {
+    const link = el.querySelector('a[href*="ARMInew26.asp"]');
+    if (!link) return null;
+    const m = link.getAttribute('href').match(/ID=([^&'"]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  // Colore "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
+  // il client avvolge tutto (nick+testo) in un unico <span style="color:
+  // ...">, spesso personalizzato (es. rosso per i master) — è quello lo
+  // span da leggere, non il nick. Il tipo 'N' non ha un colore proprio per
+  // il corpo del messaggio (solo il nick ce l'ha): in quel caso si prende
+  // il colore ereditato di default della pagina. getComputedStyle risolve
+  // già le CSS var() (--testo-msg ecc.) al valore rgb() reale corrente —
+  // ma solo su un nodo ancora agganciato al documento, mai su un clone
+  // scollegato: va chiamato PRIMA di clonare l'elemento in parseTavernaMsgEl.
+  function resolveMsgColor(el) {
+    const bodySpan = Array.from(el.children).find((c) => (
+      c.tagName === 'SPAN' && c.style && c.style.color
+      && !c.classList.contains('msg-ora') && !c.classList.contains('msg-nick')
+    ));
+    return getComputedStyle(bodySpan || el).color || null;
+  }
+
+  function parseTavernaMsgEl(el) {
+    const msgColor = resolveMsgColor(el);
+    const wrap = el.cloneNode(true);
+
+    // "Certifica oggetti in gioco": stringa automatica generata dal comando
+    // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
+    // server per questi messaggi, quindi niente speaker via link ARMInew26)
+    // e con link ai certificati reali (target="new", univoco per questo
+    // tipo di messaggio). Niente icona razza non vuol dire niente parlante:
+    // il nome è comunque il primo token del testo ("NICK  - Al suo
+    // arrivo, ha indosso, ..."), recuperato più sotto come fallback quando
+    // speakerFromTavernaBlock non trova nulla.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+
+    const oraEl = wrap.querySelector('span.msg-ora');
+    const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
+    const time = timeMatch ? timeMatch[1] : null;
+
+    // 'equip' (dichiarazione oggetti): un elenco fitto di nomi separati da
+    // virgole, spezzarlo con la stessa regex azione/parlato non avrebbe
+    // senso (non c'è alcuna azione/parlato lì dentro) — un blocco unico.
+    // 'azione' (tipo '+'): si spezza come 'N' ma con i significati
+    // invertiti (vedi buildSpeechBubbles). 'normale' ('N' e chat salvate):
+    // comportamento invariato.
+    const msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
+
+    let speaker = speakerFromTavernaBlock(wrap);
+    if (!speaker && isEquipDeclaration) {
+      const raw = wrap.textContent.replace(/\s+/g, ' ').trim();
+      const withoutTime = time ? raw.replace(/^\d{2}:\d{2}\s*/, '') : raw;
+      const m = withoutTime.match(/^(.+?)\s+-\s+/);
+      if (m) speaker = m[1].trim();
+    }
+
+    const razzaImg = wrap.querySelector('img.msg-razza');
+    const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    const stemmaImg = wrap.querySelector('img.msg-stemma');
+    const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
+
+    const coordSpan = wrap.querySelector('span.msg-pos-tag');
+    const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
+    const labelSpan = wrap.querySelector('span.msg-tag-pos');
+    const posLabel = labelSpan ? decodeEntitiesOnce(labelSpan.textContent).replace(/[[\]]/g, '').trim() : null;
+
+    const tags = [];
+    if (posLabel) tags.push({ kind: 'L', label: posLabel });
+    [['S', 'msg-tag-status'], ['A', 'msg-tag-arcani'], ['P', 'msg-tag-png'], ['F', 'msg-tag-fato'], ['M', 'msg-tag-missione']]
+      .forEach(([kind, cls]) => {
+        wrap.querySelectorAll('span.' + cls).forEach((tEl) => {
+          const label = decodeEntitiesOnce(tEl.textContent).replace(/[[\]]/g, '').trim();
+          if (label) tags.push({ kind, label });
+        });
+      });
+    tags.sort((a, b) => TAG_KIND_ORDER[a.kind] - TAG_KIND_ORDER[b.kind]);
+
+    // Tag MEDICO: qui il client renderizza direttamente un'icona
+    // (tagmedico.png), mai uno span msg-tag-med — va letto PRIMA di
+    // rimuovere le img qui sotto.
+    let med = null;
+    const medImg = wrap.querySelector('img[src*="tagmedico"]');
+    if (medImg) med = medImg.getAttribute('title') || medImg.getAttribute('alt') || 'Medico';
+
+    wrap.querySelectorAll(
+      'span.msg-ora, span.msg-nick, span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, img'
+    ).forEach((n) => n.remove());
+    let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
+    // Per azione/skill/dado il nick (con eventuale "carica" davanti) resta
+    // incollato dentro il testo — .msg-nick esiste solo per i messaggi
+    // normali (già rimosso sopra). Se conosciamo il parlante dal link
+    // dell'icona razza, si toglie tutto fino alla fine del suo nome.
+    if (speaker) {
+      const idx = testo.indexOf(speaker);
+      if (idx !== -1 && idx < 40) {
+        testo = testo.slice(idx + speaker.length).replace(/^\s*-?\s+/, '');
+      }
+    }
+
+    if (!time && !testo) return null;
+    const unsupportedType = !speaker;
+
+    return {
+      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
+      unsupportedType, msgType, msgColor,
+    };
+  }
+
+  function parseChatTaverna(container) {
+    const messages = Array.from(container.querySelectorAll(':scope > .chat-msg'))
+      .map((el) => parseTavernaMsgEl(el))
+      .filter(Boolean);
+    return {
+      locationName: (window.CONFIG && window.CONFIG.loc) || null,
+      dateLabel: 'Chat live',
+      messages,
+    };
+  }
+
+  const chatParsed = isLive ? parseChatTaverna(document.getElementById('chat-messages')) : parseChatSalvata(document);
   console.log('[lot-chat-viewer] chat parsata:', chatParsed.locationName, chatParsed.dateLabel,
     '—', chatParsed.messages.length, 'messaggi');
   // I messaggi con parlante non riconosciuto (unsupportedType, vedi
@@ -636,7 +833,9 @@
   // --- Timeline: naviga i messaggi uno alla volta, ricostruendo lo stage
   // sul sottoinsieme messages[0..indice] a ogni passo (posizioni + stack
   // riflettono sempre "cosa si vedrebbe a quel punto della giocata").
-  function renderTimeline(chatParsed, pgRecords, mappa) {
+  function renderTimeline(chatParsed, pgRecords, mappa, opts) {
+    opts = opts || {};
+    const mode = opts.mode || 'replay'; // 'replay' (chat_salvate) | 'live' (chat_taverne)
     if (!mappa.mapUrl) {
       console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
       return;
@@ -648,11 +847,16 @@
       return;
     }
 
-    let index = 0; // parte dal primo messaggio della chat
+    // In live segue sempre l'ultimo messaggio arrivato (come uno scroll di
+    // chat che si autoaggiorna); in replay parte dal primo, l'utente naviga
+    // a mano con ◀▶.
+    let index = mode === 'live' ? chatParsed.messages.length - 1 : 0;
 
     // Layout a schermo intero, due colonne (mappa | timeline) — senza una
     // toolbar di selezione in alto: qui la chat è già quella aperta nella
-    // pagina, non c'è nulla da scegliere.
+    // pagina, non c'è nulla da scegliere. Palette propria del viewer, fissa
+    // per entrambe le modalità (replay e live) — provato a inseguire i
+    // colori/sfondo reali di lot, resa peggiore: si torna alla nostra.
     const COLOR_BG = '#120f0c';
     const COLOR_SURFACE = '#1c1610';
     const COLOR_SURFACE2 = '#281f16';
@@ -673,6 +877,10 @@
       'box-sizing:border-box', `background:${COLOR_BG}`, `color:${COLOR_TEXT}`,
       'font-family:-apple-system,"Segoe UI",system-ui,sans-serif',
       'padding:14px', 'display:flex', 'overflow:hidden',
+      // In live il pannello prende il posto di #chat-messages dentro il
+      // flex column di #chat-container (che già gestisce toolbar/input
+      // sotto): basta flex:1, niente calcolo manuale dell'altezza.
+      mode === 'live' ? 'flex:1 1 auto;min-height:0;min-width:0;' : '',
     ].join(';');
 
     const stageFrame = document.createElement('div');
@@ -906,7 +1114,11 @@
     let lastCompact = null;
     const nativeCellW = mappa.mapWidth / mappa.cols;
     const nativeCellH = mappa.mapHeight / mappa.rows;
-    const view = { zoom: 1, panX: 0, panY: 0 };
+    // In live la scena si ricostruisce da zero ad ogni nuovo messaggio (vedi
+    // fondo file): senza uno stato esterno, zoom/pan tornerebbero a 100%
+    // centrato ogni volta che qualcuno parla. Chi chiama passa lo stesso
+    // oggetto ad ogni rebuild — si muta quello invece di crearne uno nuovo.
+    const view = opts.view || { zoom: 1, panX: 0, panY: 0 };
     let fitScale = 1;
     let lastActiveCoordLabel = null;
 
@@ -1550,15 +1762,46 @@
     // Segmenti «azione»/parlato impilati in verticale,
     // ognuno nel proprio fumetto (bordo tondo per il parlato, squadrato +
     // corsivo per l'azione), leggero rientro laterale per distinguerli
-    // anche quando due dello stesso tipo si susseguono.
-    function buildSpeechBubbles(text) {
+    // anche quando due dello stesso tipo si susseguono. Palette sempre
+    // quella del viewer (COLOR_SURFACE/COLOR_TEXT), non quella del
+    // messaggio originale su lot.
+    //
+    // I messaggi di tipo '+' (chat live, msg.msgType === 'azione') si
+    // spezzano allo stesso modo dei normali ('N'), ma con i due significati
+    // scambiati: fuori parentesi è l'azione/narrazione (il client la scrive
+    // in chiaro), dentro «»/<>/ecc. è il parlato — esatto opposto di 'N',
+    // dove fuori è il parlato e dentro l'azione. Le chat salvate non
+    // impostano msgType (undefined): invert resta false, comportamento
+    // invariato.
+    //
+    // borderColor (msg.msgColor, solo per i '+'): non tocchiamo più
+    // sfondo/testo del fumetto (resa peggiore, si torna alla palette del
+    // viewer), ma il bordo sì — evidenzia a colpo d'occhio i messaggi
+    // azione col colore reale con cui li mostra lot, rosso di un master
+    // compreso, senza confondersi con quelli normali (bordo neutro COLOR_LINE).
+    //
+    // singleBlock (msg.msgType === 'equip'): dichiarazione oggetti, un
+    // elenco di nomi senza alcuna azione/parlato al suo interno — un unico
+    // blocco, niente split.
+    function buildSpeechBubbles(text, invert, borderColor, singleBlock) {
       const bubbles = document.createElement('div');
-      const slots = splitSegments(text).map((p) => {
+      const border = borderColor || COLOR_LINE;
+      if (singleBlock) {
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
+        ].join(';');
+        bubble.textContent = text;
+        bubbles.appendChild(bubble);
+        return bubbles;
+      }
+      const slots = splitSegments(text, invert).map((p) => {
         const slot = document.createElement('div');
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${COLOR_LINE}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
@@ -1657,7 +1900,12 @@
         card.appendChild(typeNote);
       }
 
-      card.appendChild(buildSpeechBubbles(msg.testo));
+      card.appendChild(buildSpeechBubbles(
+        msg.testo,
+        msg.msgType === 'azione',
+        (msg.msgType === 'azione' || msg.msgType === 'equip') ? msg.msgColor : null,
+        msg.msgType === 'equip'
+      ));
 
       return card;
     }
@@ -1732,15 +1980,21 @@
     prevBtn.addEventListener('click', () => { if (index > 0) { index -= 1; draw(); } });
     nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) { index += 1; draw(); } });
 
-    // Va inserito subito dopo .lot-chat (non in coda al body): resta così
-    // nel punto naturale del layout, sotto title/subtitle che restano
-    // visibili sopra invariati. .lot-chat va nascosto PRIMA di misurare
-    // la posizione del pannello, altrimenti il suo testo (ancora
-    // visibile) spingerebbe il pannello più in basso di dove deve stare.
-    const originalChat = document.querySelector('.lot-chat');
+    // Va inserito subito dopo l'area messaggi originale (non in coda al
+    // body): in replay resta così nel punto naturale del layout, sotto
+    // title/subtitle che restano visibili sopra invariati; in live prende
+    // il posto di #chat-messages dentro #chat-container, lasciando
+    // toolbar/input sotto intatti e funzionanti (sola lettura: qui non si
+    // tocca in alcun modo l'input del giocatore). L'originale va nascosto
+    // PRIMA di misurare la posizione del pannello, altrimenti il suo testo
+    // (ancora visibile) spingerebbe il pannello più in basso di dove deve
+    // stare.
+    const originalChat = mode === 'live' ? document.getElementById('chat-messages') : document.querySelector('.lot-chat');
     if (originalChat) originalChat.style.display = 'none';
-    const footer = document.querySelector('.lot-footer');
-    if (footer) footer.style.display = 'none';
+    if (mode !== 'live') {
+      const footer = document.querySelector('.lot-footer');
+      if (footer) footer.style.display = 'none';
+    }
 
     if (originalChat && originalChat.parentNode) {
       originalChat.parentNode.insertBefore(panel, originalChat.nextSibling);
@@ -1748,14 +2002,17 @@
       document.body.appendChild(panel);
     }
 
-    // Riempie lo spazio verticale rimasto fino in fondo alla finestra
-    // (non tutta la finestra: title/subtitle sopra occupano la loro
-    // fascia), poi ricalcola fitScale/righello sul layout reale appena
-    // misurato — richiamata sia ora sia ogni volta che il banner riaccende
-    // la scena (vedi refreshSceneLayout più sopra).
+    // In live il pannello è già dimensionato dal flex:1 del suo contenitore
+    // (#chat-container), niente calcolo manuale — solo ricalcolo di
+    // fitScale/righello sul layout reale. In replay riempie lo spazio
+    // verticale rimasto fino in fondo alla finestra (title/subtitle sopra
+    // occupano la loro fascia) — richiamata sia ora sia ogni volta che il
+    // banner riaccende la scena (vedi refreshSceneLayout più sopra).
     function layoutPanel() {
-      const top = panel.getBoundingClientRect().top;
-      panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
+      if (mode !== 'live') {
+        const top = panel.getBoundingClientRect().top;
+        panel.style.height = Math.max(200, window.innerHeight - top - 16) + 'px';
+      }
       updateFitScale();
       applyView();
     }
@@ -1766,18 +2023,82 @@
     console.log('[lot-chat-viewer] timeline pronta:', chatParsed.messages.length, 'messaggi');
   }
 
-  const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
-  Promise.all([
-    Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
-    fetchMappa(),
-  ])
-    .then(([pgRecords, mappa]) => {
-      console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
-      console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
-      rebuildScene = () => renderTimeline(chatParsed, pgRecords, mappa);
-      rebuildScene();
-    })
-    .catch((err) => {
-      console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
+  if (!isLive) {
+    // --- Replay: un solo parse, un solo fetch, la chat non cambia più. ---
+    const chatDerivedRoster = buildChatDerivedRoster(chatParsed.messages);
+    Promise.all([
+      Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
+      fetchMappa(),
+    ])
+      .then(([pgRecords, mappa]) => {
+        console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
+        console.log('[lot-chat-viewer] mappa:', JSON.stringify(mappa, null, 2));
+        rebuildScene = () => renderTimeline(chatParsed, pgRecords, mappa);
+        rebuildScene();
+      })
+      .catch((err) => {
+        console.error('[lot-chat-viewer] errore nella risoluzione scena:', err);
+      });
+  } else {
+    // --- Live: #chat-messages riceve nuovi <div class="chat-msg"> dal
+    // polling di chat_taverne.js. Si osserva il container con un
+    // MutationObserver (nessun polling proprio, sola lettura di DOM che
+    // arriva comunque per conto suo) e ad ogni raffica di nuovi messaggi si
+    // ri-parsa TUTTO il container e si ricostruisce la scena da zero —
+    // stessa filosofia "rebuild, mai patch" già in uso per il toggle
+    // mostra/nascondi (vedi commento in cima al file). zoom/pan sono
+    // sopravvissuti al rebuild tramite liveView (vedi opts.view in
+    // renderTimeline); la mappa, una volta risolta, non cambia più nel
+    // corso della sessione (stesso presupposto del replay: il luogo è
+    // quello dove si trova il PG ora) e non viene rifetchata ad ogni
+    // messaggio.
+    const liveContainer = document.getElementById('chat-messages');
+    const liveView = { zoom: 1, panX: 0, panY: 0 };
+    let liveMappa = null;
+    let liveDebounce = null;
+
+    function resolveAndRenderLive() {
+      const parsed = parseChatTaverna(liveContainer);
+      if (!parsed.messages.length) return;
+      const chatDerivedRoster = buildChatDerivedRoster(parsed.messages);
+      const liveRoster = Array.from(new Set(
+        parsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+      ));
+      Promise.all([
+        Promise.all(liveRoster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
+        liveMappa ? Promise.resolve(liveMappa) : fetchMappa(),
+      ])
+        .then(([pgRecords, mappa]) => {
+          liveMappa = mappa;
+          // rebuildScene va sempre riassegnata ai dati appena risolti, anche
+          // a scena nascosta (banner spento, utente sulla vista originale
+          // di lot): altrimenti il banner "mostra" richiamerebbe la
+          // versione ferma all'ultimo momento in cui era visibile, perdendo
+          // tutti i messaggi arrivati nel frattempo. Si evita solo di
+          // toccare il DOM adesso se non è comunque visibile.
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView });
+          if (sceneVisible) rebuildScene();
+        })
+        .catch((err) => {
+          console.error('[lot-chat-viewer] errore nella risoluzione scena live:', err);
+        });
+    }
+
+    resolveAndRenderLive();
+
+    // Debounce: chat_taverne.js può iniettare più <div class="chat-msg"> in
+    // un solo batch di polling — un rebuild per nodo sarebbe sia inutile
+    // sia visivamente a scatti. Gira sempre, anche a scena nascosta (vedi
+    // sopra): a scena spenta si aggiornano solo i dati, non il DOM.
+    const observer = new MutationObserver((mutations) => {
+      const hasNewMsg = mutations.some((m) => m.addedNodes.length > 0);
+      if (!hasNewMsg) return;
+      if (liveDebounce) clearTimeout(liveDebounce);
+      liveDebounce = setTimeout(() => {
+        liveDebounce = null;
+        resolveAndRenderLive();
+      }, 400);
     });
+    observer.observe(liveContainer, { childList: true });
+  }
 })();

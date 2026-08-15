@@ -1,11 +1,11 @@
 # lot-chat-viewer
 
-Visualizzatore non ufficiale, fan-made, per [Extremelot](https://www.extremelot.eu) — trasforma la chat testuale del gioco in una scena spaziale (mappa + modellini dei personaggi), sia per rileggere chat già giocate sia — quando disponibile — per seguire una chat in corso.
+Visualizzatore non ufficiale, fan-made, per [Extremelot](https://www.extremelot.eu) — trasforma la chat testuale del gioco in una scena spaziale (mappa + modellini dei personaggi), sia per seguire una chat in corso sia per rileggere chat già giocate.
 
 ## Cos'è e cosa NON è
 
 - **Non ufficiale.** Nessuna affiliazione con Extremelot o con la sua proprietà. Se la proprietà fosse interessata a integrare qualcosa di simile nativamente nel gioco, il codice è qui, MIT, libero di essere riusato o preso a riferimento — contattatemi pure.
-- **Sola lettura.** Non invia comandi, non simula azioni, non interagisce in alcun modo con il gioco. Legge quello che il browser del giocatore vede già, nella sua sessione già autenticata, e basta.
+- **Sola lettura.** Non invia comandi, non simula azioni, non interagisce in alcun modo con il gioco. Legge quello che il browser del giocatore vede già, nella sua sessione già autenticata, e basta. Nella chat live sostituisce solo l'area messaggi: toolbar e barra di scrittura restano intatte e funzionanti.
 - **Non aggiunge funzionalità di gioco.** Nessuna informazione, meccanica o vantaggio che non sia già visibile al giocatore tramite l'interfaccia normale di Extremelot. È solo un modo diverso di *guardare* dati che il giocatore ha già davanti.
 - **Non intercetta né salva nulla lato server.** Non esiste un backend. Tutto gira client-side, nel browser del singolo giocatore, dentro la sua sessione. Nessun dato transita o si ferma su un server terzo gestito da questo progetto.
 - **Non cambia l'input dei giocatori.** Non altera form, comandi, invio messaggi o qualunque altra interazione che il giocatore ha con lot.
@@ -14,7 +14,7 @@ Visualizzatore non ufficiale, fan-made, per [Extremelot](https://www.extremelot.
 
 Uno userscript (Tampermonkey/Violentmonkey — funziona su Chrome, Firefox, Edge, Safari, Opera) si attiva sulle pagine di chat di Extremelot già aperte dal giocatore nel proprio browser, con la propria sessione. Da lì:
 
-- legge il testo della chat (salvata o live) già presente nella pagina
+- legge il testo della chat (live o salvata) già presente nella pagina
 - arricchisce la visualizzazione recuperando, con richieste same-origin nella stessa sessione del giocatore (nessuna credenziale gestita da questo progetto), dati già pubblici per quel giocatore su lot: scheda dei personaggi citati in chat, mappa del luogo
 - disegna una scena con mappa e modellini al posto — o accanto — al testo grezzo
 
@@ -29,16 +29,24 @@ Uno userscript (Tampermonkey/Violentmonkey — funziona su Chrome, Firefox, Edge
    - Ricarica la pagina di lot su cui vuoi usare lo script
 
    *(Firefox e Safari non hanno questa limitazione, il passaggio 3 non serve.)*
-4. **Verifica che funzioni.** Vai su una pagina di chat salvata di Extremelot, ad esempio `https://www.extremelot.eu/proc/chat/chat_salvate03.asp` (con la tua sessione già loggata). In alto a destra dovresti vedere un banner *"lot-chat-viewer — clicca per mostrare/nascondere"* — conferma che lo script gira correttamente sulla pagina.
+4. **Verifica che funzioni.** Entra in una chat qualsiasi in gioco (locazione con altri PG, o anche da solo). In alto a destra dovresti vedere un banner *"lot-chat-viewer by Alderick — clicca per mostrare/nascondere"* — conferma che lo script gira correttamente sulla pagina.
 
 Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampermonkey (grazie a `@updateURL`), senza bisogno di reinstallare a mano.
 
-## Come usarlo (replay di una chat salvata)
+## Come usarlo — chat live (uso principale)
 
-1. **In gioco**, apri il **Registro CHAT** (in fondo alla pagina, sotto l'elenco delle chat) e seleziona la chat salvata che vuoi rileggere — si apre una nuova finestra su `chat_salvate*.asp`.
-2. **Porta il tuo PG, sulla mappa di lot, nella stessa locazione della chat che vuoi rileggere** (prima o dopo aver aperto il registro, l'ordine non conta). È necessario perché lo script recupera l'immagine e la griglia della mappa dalla pagina mappa reale del luogo in cui il tuo PG si trova *ora* — non da dove si trovava quando quella chat fu giocata. Se il PG è altrove, lo script non trova nessuna mappa da mostrare.
-3. Torna sulla finestra della chat salvata aperta al passo 1: lo script si attiva da solo, sostituendo il testo grezzo con la scena (mappa a sinistra, timeline dei messaggi a destra). Se non parte da solo, ricarica la pagina.
-4. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat.
+1. **Entra in una chat** in gioco, come faresti normalmente (`chat_taverne.asp`, caricata in un iframe della pagina).
+2. Lo script si attiva da solo, sostituendo l'area messaggi con la scena (mappa a sinistra, timeline a destra) — toolbar e barra di scrittura restano dove sono, invariate.
+3. La scena si aggiorna da sola quando arrivano nuovi messaggi (segue sempre l'ultimo, come uno scroll che si autoaggiorna). Zoom e posizione sulla mappa scelti a mano restano quelli anche dopo un aggiornamento.
+4. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat live di lot — utile anche solo per scrivere più comodamente restando sulla vista di lot, la scena riprende da dove era rimasta al prossimo "mostra".
+
+## Come usarlo — replay di una chat salvata
+
+1. **Prima di tutto, portati sulla mappa di lot nella locazione della chat che vuoi rileggere.** È necessario perché lo script recupera l'immagine e la griglia della mappa dalla pagina mappa reale del luogo in cui il tuo PG si trova *ora* — non da dove si trovava quando quella chat fu giocata. Se il PG è altrove, lo script non trova nessuna mappa da mostrare.
+2. **In una chat qualsiasi** (non serve essere in quella specifica locazione: il Registro CHAT elenca tutte le chat salvate a cui hai partecipato, ovunque fossero), apri la toolbar in basso e clicca l'icona **"Registro chat"** (il libro). Si apre una modale con l'elenco.
+3. Clicca la chat che vuoi rileggere: si apre una **nuova finestra** su `chat_salvate*.asp` con il testo grezzo di quella sessione.
+4. Su quella nuova finestra, lo script si attiva da solo, sostituendo il testo grezzo con la scena. Se non parte da solo, ricarica la pagina.
+5. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat.
 
 Nota: la mappa mostra solo l'immagine e la griglia del luogo — i movimenti dei personaggi che vedi nella scena vengono ricostruiti dalle coordinate scritte nella chat stessa (tag `[G4]` ecc.), non da una posizione live sulla mappa reale.
 
@@ -49,24 +57,32 @@ Nota: la mappa mostra solo l'immagine e la griglia del luogo — i movimenti dei
    - il passaggio 3 sopra (Allow User Scripts) su Chrome/Edge — causa più comune
    - che l'interruttore generale di Tampermonkey (icona dell'estensione in barra) sia ON, non in pausa
    - nella dashboard di Tampermonkey (Installed userscripts), che "lot-chat-viewer" sia abilitato
-   - che l'URL della pagina inizi con `https://www.extremelot.eu/proc/chat/chat_salvate` (lo script non si attiva altrove)
+   - che l'URL della pagina inizi con `https://www.extremelot.eu/proc/chat/chat_taverne` (live) o `chat_salvate` (replay) — lo script non si attiva altrove
 3. **La riga c'è, dice "banner agganciato a BODY", ma non lo vedi comunque** → probabile conflitto CSS con la pagina; apri una issue nel repo con uno screenshot.
 
 ## Stato
 
-Replay funzionante di una chat salvata:
+Chat **live** (`chat_taverne.asp`), uso principale:
+
+- Sostituisce solo l'area messaggi, toolbar/barra di scrittura sempre intatte e funzionanti
+- Scena aggiornata in automatico ai nuovi messaggi, anche mentre la scena è nascosta e si sta guardando la vista originale di lot
+- Messaggi azione (`+`) spezzati in fumetti azione/parlato come i normali, ma con i due significati scambiati (fuori parentesi è l'azione, dentro è il parlato) — bordo del fumetto evidenziato col colore reale con cui lot mostra quel messaggio (es. rosso per un master)
+- Messaggi di dichiarazione oggetti ("Certifica Possesso in Gioco") attribuiti correttamente al PG, mostrati come blocco unico
+- Gestione di testo con `«»`/`<>`/ecc. annidati o spaiati (frequenti nelle formule di incantesimo) senza corrompere la suddivisione in fumetti
+
+Replay di una chat salvata (`chat_salvate*.asp`):
 
 - Mappa del luogo con griglia, pan (trascinamento) e zoom (rotellina, verso il cursore), righello lettere/numeri, coordinata sotto il cursore
 - Personaggi come stemma compatto (zoom basso) o modellino intero a layer corpo/vestito (zoom alto), con ventaglio automatico quando più PG condividono una cella, PG che sta parlando evidenziato (cella colorata, e sul modellino intero anche freccia + glow)
 - Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
-- Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro — mai visti su una chat reale finora) restano visibili con una nota, invece di sparire in silenzio
+- Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro) restano visibili con una nota, invece di sparire in silenzio
 
 Non ancora presente:
 
-- Modalità chat **live** (solo chat salvate, per ora)
 - Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
 - Selettore di luogo/chat (qui non serve: la chat è già quella aperta nella pagina)
+- Sussurri e messaggi di moderazione/admin in chat live: restano visibili ma senza parlante riconosciuto ("Sistema")
 
 Vedi le issue del repo per lo stato di avanzamento dettagliato.
 
