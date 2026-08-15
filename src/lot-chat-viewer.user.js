@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.47
+// @version      0.0.48
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2013,8 +2013,14 @@
           // tema chiaro/notturno su lot a metà sessione, la scena lo segue
           // al prossimo messaggio senza bisogno di ricaricare la pagina.
           const lotBgColor = getComputedStyle(liveContainer).backgroundColor;
+          // rebuildScene va sempre riassegnata ai dati appena risolti, anche
+          // a scena nascosta (banner spento, utente sulla vista originale
+          // di lot): altrimenti il banner "mostra" richiamerebbe la
+          // versione ferma all'ultimo momento in cui era visibile, perdendo
+          // tutti i messaggi arrivati nel frattempo. Si evita solo di
+          // toccare il DOM adesso se non è comunque visibile.
           rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, lotBgColor });
-          rebuildScene();
+          if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
           console.error('[lot-chat-viewer] errore nella risoluzione scena live:', err);
@@ -2025,14 +2031,15 @@
 
     // Debounce: chat_taverne.js può iniettare più <div class="chat-msg"> in
     // un solo batch di polling — un rebuild per nodo sarebbe sia inutile
-    // sia visivamente a scatti.
+    // sia visivamente a scatti. Gira sempre, anche a scena nascosta (vedi
+    // sopra): a scena spenta si aggiornano solo i dati, non il DOM.
     const observer = new MutationObserver((mutations) => {
       const hasNewMsg = mutations.some((m) => m.addedNodes.length > 0);
       if (!hasNewMsg) return;
       if (liveDebounce) clearTimeout(liveDebounce);
       liveDebounce = setTimeout(() => {
         liveDebounce = null;
-        if (sceneVisible) resolveAndRenderLive();
+        resolveAndRenderLive();
       }, 400);
     });
     observer.observe(liveContainer, { childList: true });
