@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.50
+// @version      0.0.51
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -296,26 +296,62 @@
   // '+' (azione, chat live) è l'esatto contrario — il client scrive lì
   // l'azione/narrazione in chiaro e il parlato dentro «»/<>. `invert`
   // scambia i due significati senza duplicare la logica di parsing.
+  //
+  // Scansione a pila, non una singola regex non-greedy: i testi di gioco
+  // (soprattutto le formule di incantesimo) usano «» sia per le citazioni
+  // di gioco sia per il discorso diretto nello stesso messaggio, spesso
+  // riaprendone uno nuovo prima che il precedente si chiuda — con
+  // `«[^»]*»` (esclude solo » dal contenuto, non «) il primo « "adottava"
+  // tutto fino alla » più lontana invece che alla sua vera coppia,
+  // lasciando bolle spaiate con un solo "»" e testo troncato a metà. Qui un
+  // « annidato apre un nuovo livello; si richiude nel buffer del livello
+  // sopra (delimitatori compresi, nessun carattere perso) solo quando non è
+  // il più esterno — un solo fumetto per il livello più esterno, come
+  // prima. Delimitatori rimasti aperti a fine testo (spaiati, capita nel
+  // testo libero dei giocatori) restano comunque visibili come testo
+  // semplice invece di far sparire tutto quel che segue.
   function splitSegments(text, invert) {
-    const re = /«[^»]*»|<[^>]*>|\([^)]*\)|\{[^}]*\}|\[[^\]]*\]/g;
-    const outside = invert ? 'action' : 'speech';
-    const inside = invert ? 'speech' : 'action';
+    const CLOSE_OF = { '«': '»', '<': '>', '(': ')', '{': '}', '[': ']' };
+    const outsideType = invert ? 'action' : 'speech';
+    const insideType = invert ? 'speech' : 'action';
     const pages = [];
-    let last = 0, m;
-    while ((m = re.exec(text))) {
-      if (m.index > last) {
-        const plain = text.slice(last, m.index).trim();
-        if (plain) pages.push({ type: outside, content: plain });
+    let outside = '';
+    const stack = []; // { open, close, buf }
+    const flushOutside = () => {
+      const plain = outside.trim();
+      if (plain) pages.push({ type: outsideType, content: plain });
+      outside = '';
+    };
+    for (const ch of text) {
+      if (stack.length && ch === stack[stack.length - 1].close) {
+        const frame = stack.pop();
+        if (stack.length === 0) {
+          const inner = frame.buf.trim();
+          if (inner) pages.push({ type: insideType, content: inner });
+        } else {
+          stack[stack.length - 1].buf += frame.open + frame.buf + ch;
+        }
+        continue;
       }
-      const inner = m[0].slice(1, -1).trim();
-      if (inner) pages.push({ type: inside, content: inner });
-      last = re.lastIndex;
+      const close = CLOSE_OF[ch];
+      if (close) {
+        if (stack.length === 0) flushOutside();
+        stack.push({ open: ch, close, buf: '' });
+        continue;
+      }
+      if (stack.length) stack[stack.length - 1].buf += ch;
+      else outside += ch;
     }
-    if (last < text.length) {
-      const tail = text.slice(last).trim();
-      if (tail) pages.push({ type: outside, content: tail });
+    while (stack.length > 1) {
+      const inner = stack.pop();
+      stack[stack.length - 1].buf += inner.open + inner.buf;
     }
-    return pages.length ? pages : [{ type: outside, content: text.trim() }];
+    if (stack.length) {
+      const last = stack.pop();
+      outside += last.open + last.buf;
+    }
+    flushOutside();
+    return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
   }
 
   function speakerFromBlock(wrap) {
