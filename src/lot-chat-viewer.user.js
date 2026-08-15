@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.49
+// @version      0.0.50
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1861,7 +1861,7 @@
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        msg.msgType === 'azione' ? msg.msgColor : null,
+        (msg.msgType === 'azione' || msg.msgType === 'equip') ? msg.msgColor : null,
         msg.msgType === 'equip'
       ));
 
