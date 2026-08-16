@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.64
+// @version      0.0.65
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1993,12 +1993,17 @@
         raceIcon.style.cssText = 'width:10px;height:10px;flex:0 0 auto;';
         // Link reale che lot mette sulla sua icona razza in questo preciso
         // messaggio (scheda PG in live, avatar.asp in replay) — un drago
-        // non ce l'ha, l'icona resta senza link in quel caso.
+        // non ce l'ha, l'icona resta senza link in quel caso. In live è un
+        // URI javascript: (chiama window.open() da sé, come fa lot stesso)
+        // — target="_blank" lì apre una scheda vuota invece di eseguirlo,
+        // va messo solo sugli href http(s) veri come quello di replay.
         if (msg.razzaLink) {
           const raceLink = document.createElement('a');
           raceLink.href = msg.razzaLink;
-          raceLink.target = '_blank';
-          raceLink.rel = 'noopener';
+          if (!/^javascript:/i.test(msg.razzaLink)) {
+            raceLink.target = '_blank';
+            raceLink.rel = 'noopener';
+          }
           raceLink.style.cssText = 'flex:0 0 auto;line-height:0;';
           raceLink.appendChild(raceIcon);
           header.appendChild(raceLink);
