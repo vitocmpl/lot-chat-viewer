@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.65
+// @version      0.0.68
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -63,7 +63,7 @@
   banner.textContent = 'lot-chat-viewer by Alderick — clicca per mostrare/nascondere';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
-    'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
+    `position:fixed`, `top:${isLive ? '-2px' : '8px'}`, 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace', 'cursor:pointer',
     'padding:6px 10px', 'border-radius:4px', 'opacity:0.85',
   ].join(';');
@@ -907,6 +907,12 @@
     return letter;
   }
 
+  // Stesso filter che lot applica a .msg-stemma in modalità notte (default
+  // del client) — un doppio drop-shadow color oro, non un box-shadow: va
+  // sull'<img> stesso, non su un contenitore, altrimenti seguirebbe il
+  // riquadro invece del profilo trasparente dello stemma.
+  const STEMMA_FILTER = 'drop-shadow(0 0 3px #F8E9AA) drop-shadow(0 0 1px #F8E9AA)';
+
   function raceIconUrl(razza, sesso) {
     if (!razza) return null;
     return 'https://www.extremelot.eu/lotnew/img/razze/' + razza.toUpperCase() + (sesso === 'Femmina' ? 'F' : 'M') + '.gif';
@@ -926,7 +932,15 @@
       img.src = pg.censoUrl;
       img.alt = '';
       img.draggable = false;
-      img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
+      el.appendChild(img);
+    } else if (pg.iconUrl) {
+      el.style.background = pgAccentColor(pg.nome);
+      const img = document.createElement('img');
+      img.src = pg.iconUrl;
+      img.alt = '';
+      img.draggable = false;
+      img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
       el.appendChild(img);
     } else if (pg.iconUrl) {
       el.style.background = pgAccentColor(pg.nome);
@@ -1098,6 +1112,9 @@
       schedaPopupAvatar.src = avatarUrl;
       schedaPopupAvatar.style.display = avatarUrl ? 'block' : 'none';
       schedaPopupAvatar.style.cursor = pg.ritrattoUrl ? 'zoom-in' : 'default';
+      // Filter solo quando è davvero lo stemma a fare da avatar (nessun
+      // ritratto caricato) — su una foto reale lot non applica alcun glow.
+      schedaPopupAvatar.style.filter = (!pg.ritrattoUrl && pg.censoUrl) ? STEMMA_FILTER : '';
       schedaPopupAvatar.onclick = pg.ritrattoUrl
         ? () => { closeSchedaPopup(); openAvatarLightbox(pg.ritrattoUrl, pg.nome); }
         : null;
@@ -1581,7 +1598,11 @@
 
       const iconBadge = document.createElement('div');
       iconBadge.style.cssText = [
-        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto', 'overflow:hidden',
+        // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
+        // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
+        // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
+        // (stesso border-radius) per restare pulita senza contenitore.
+        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
         'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
         'display:flex', 'align-items:center', 'justify-content:center',
         'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
@@ -1592,7 +1613,7 @@
         img.src = pg.censoUrl;
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+        img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
         iconBadge.appendChild(img);
       } else {
         iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
@@ -1975,7 +1996,10 @@
       header.style.cssText = 'display:flex;align-items:center;gap:9px;flex-wrap:wrap;';
 
       const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
+      // (STEMMA_FILTER) a un bordo secco — il quadrato non ha border-radius
+      // quindi non serve comunque a "pulire" gli angoli dell'immagine.
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;color:#fff8ec;';
       fillAvatar(avatar, pg);
       header.appendChild(avatar);
 
@@ -2105,7 +2129,10 @@
       row.addEventListener('mouseleave', () => { row.style.borderColor = COLOR_LINE; });
 
       const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
+      // (STEMMA_FILTER) a un bordo secco — il quadrato non ha border-radius
+      // quindi non serve comunque a "pulire" gli angoli dell'immagine.
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;color:#fff8ec;';
       fillAvatar(avatar, pg);
       row.appendChild(avatar);
 
