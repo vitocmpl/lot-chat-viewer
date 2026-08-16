@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.66
+// @version      0.0.67
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -907,6 +907,12 @@
     return letter;
   }
 
+  // Stesso filter che lot applica a .msg-stemma in modalità notte (default
+  // del client) — un doppio drop-shadow color oro, non un box-shadow: va
+  // sull'<img> stesso, non su un contenitore, altrimenti seguirebbe il
+  // riquadro invece del profilo trasparente dello stemma.
+  const STEMMA_FILTER = 'drop-shadow(0 0 3px #F8E9AA) drop-shadow(0 0 1px #F8E9AA)';
+
   function raceIconUrl(razza, sesso) {
     if (!razza) return null;
     return 'https://www.extremelot.eu/lotnew/img/razze/' + razza.toUpperCase() + (sesso === 'Femmina' ? 'F' : 'M') + '.gif';
@@ -926,7 +932,7 @@
       img.src = pg.censoUrl;
       img.alt = '';
       img.draggable = false;
-      img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
       el.appendChild(img);
     } else if (pg.iconUrl) {
       el.style.background = pgAccentColor(pg.nome);
@@ -1098,6 +1104,9 @@
       schedaPopupAvatar.src = avatarUrl;
       schedaPopupAvatar.style.display = avatarUrl ? 'block' : 'none';
       schedaPopupAvatar.style.cursor = pg.ritrattoUrl ? 'zoom-in' : 'default';
+      // Filter solo quando è davvero lo stemma a fare da avatar (nessun
+      // ritratto caricato) — su una foto reale lot non applica alcun glow.
+      schedaPopupAvatar.style.filter = (!pg.ritrattoUrl && pg.censoUrl) ? STEMMA_FILTER : '';
       schedaPopupAvatar.onclick = pg.ritrattoUrl
         ? () => { closeSchedaPopup(); openAvatarLightbox(pg.ritrattoUrl, pg.nome); }
         : null;
@@ -1592,7 +1601,7 @@
         img.src = pg.censoUrl;
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+        img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
         iconBadge.appendChild(img);
       } else {
         iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
