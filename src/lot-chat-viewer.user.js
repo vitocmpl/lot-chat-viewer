@@ -942,6 +942,14 @@
       img.draggable = false;
       img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
       el.appendChild(img);
+    } else if (pg.iconUrl) {
+      el.style.background = pgAccentColor(pg.nome);
+      const img = document.createElement('img');
+      img.src = pg.iconUrl;
+      img.alt = '';
+      img.draggable = false;
+      img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
+      el.appendChild(img);
     } else {
       el.style.background = pgAccentColor(pg.nome);
       el.textContent = pg.nome.charAt(0);
