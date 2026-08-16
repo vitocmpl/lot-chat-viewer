@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.67
+// @version      0.0.68
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1590,7 +1590,11 @@
 
       const iconBadge = document.createElement('div');
       iconBadge.style.cssText = [
-        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto', 'overflow:hidden',
+        // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
+        // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
+        // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
+        // (stesso border-radius) per restare pulita senza contenitore.
+        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
         'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
         'display:flex', 'align-items:center', 'justify-content:center',
         'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
@@ -1601,7 +1605,7 @@
         img.src = pg.censoUrl;
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
+        img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
         iconBadge.appendChild(img);
       } else {
         iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
@@ -1984,7 +1988,10 @@
       header.style.cssText = 'display:flex;align-items:center;gap:9px;flex-wrap:wrap;';
 
       const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
+      // (STEMMA_FILTER) a un bordo secco — il quadrato non ha border-radius
+      // quindi non serve comunque a "pulire" gli angoli dell'immagine.
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;color:#fff8ec;';
       fillAvatar(avatar, pg);
       header.appendChild(avatar);
 
@@ -2114,7 +2121,10 @@
       row.addEventListener('mouseleave', () => { row.style.borderColor = COLOR_LINE; });
 
       const avatar = document.createElement('div');
-      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:10px;color:#fff8ec;';
+      // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
+      // (STEMMA_FILTER) a un bordo secco — il quadrato non ha border-radius
+      // quindi non serve comunque a "pulire" gli angoli dell'immagine.
+      avatar.style.cssText = 'width:20px;height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;color:#fff8ec;';
       fillAvatar(avatar, pg);
       row.appendChild(avatar);
 
