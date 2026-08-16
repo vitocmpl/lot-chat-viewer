@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.54
+// @version      0.0.65
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -265,6 +265,47 @@
     return el.value;
   }
 
+  // Cammina i nodi di un elemento (già ripulito da chrome/tag/img) e ne
+  // ricava una sequenza piatta di testo/link, nell'ordine in cui compaiono
+  // — usata per i messaggi "Certifica Possesso in Gioco" (msgType 'equip'),
+  // dove ogni oggetto dichiarato è un <a href target="new"> reale verso il
+  // certificato: leggerne solo il textContent (come per ogni altro
+  // messaggio) perderebbe quei link, lasciando solo i nomi come testo
+  // piatto. Nodi diversi da testo/<a> (es. <b>/<small>, wrapper di stile
+  // senza significato proprio) vengono attraversati in trasparenza, non
+  // prodotti come run a sé.
+  function extractRichRuns(containerEl) {
+    const runs = [];
+    function walk(node) {
+      if (node.nodeType === 3) {
+        if (node.textContent) runs.push({ type: 'text', value: node.textContent });
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === 'A') {
+        const text = node.textContent;
+        if (text) runs.push({ type: 'link', text, href: node.getAttribute('href') });
+        return;
+      }
+      Array.from(node.childNodes).forEach(walk);
+    }
+    Array.from(containerEl.childNodes).forEach(walk);
+    return runs;
+  }
+
+  // Il nome resta incollato dentro il primo run di testo (nessun nodo
+  // dedicato lo isola nei messaggi 'equip') — stesso taglio già fatto su
+  // "testo" altrove, qui applicato al primo run invece che a una stringa.
+  function stripSpeakerPrefixFromRuns(runs, speaker) {
+    if (!speaker || !runs.length || runs[0].type !== 'text') return runs;
+    const idx = runs[0].value.indexOf(speaker);
+    if (idx === -1 || idx > 5) return runs;
+    const rest = runs[0].value.slice(idx + speaker.length).replace(/^\s*-?\s+/, '');
+    const out = runs.slice(1);
+    if (rest) out.unshift({ type: 'text', value: rest });
+    return out;
+  }
+
   function isGreyTimestampFont(node) {
     return node.nodeType === 1 && node.tagName === 'FONT'
       && (node.getAttribute('color') || '').toUpperCase() === '#606060'
@@ -367,20 +408,69 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // Etichetta di fallback quando non c'è alcun link avatar (un vero PG dei
+  // draghi non lo espone mai, di proposito: nessun modo di risalire al
+  // giocatore reale dietro la mutaforma) — se l'icona razza del messaggio è
+  // comunque quella dei draghi, meglio un'etichetta specifica di quel
+  // generico "Sistema" condiviso con dado/moderazione/sussurro, anche se
+  // resta comunque un nome inventato, non il vero nome del drago.
+  function fallbackSpeakerLabel(razzaIcon) {
+    return razzaIcon && /\/razze\/draghi/i.test(razzaIcon) ? 'Drago' : 'Sistema';
+  }
+
+  // Stile "del messaggio" nel renderer di chat_salvate: qui non ci sono
+  // span con CSS inline come in chat_taverne, ma <FONT COLOR="..."> vecchio
+  // stile che avvolge nick+testo interi (un solo font per messaggio, oltre
+  // a quello del timestamp — quest'ultimo va escluso). Il timestamp NON si
+  // riconosce dal suo colore (#606060): alcuni messaggi — es. un drago in
+  // mutaforma — usano lo stesso grigio anche per il proprio font di
+  // contenuto, un font DIVERSO ma dello stesso colore. Va escluso per
+  // identità del nodo (il clone di timeFont passato da parseBlock), non
+  // per valore — altrimenti si perdono colore/grassetto proprio sui
+  // messaggi che più ne avrebbero bisogno per distinguersi da un vero
+  // messaggio di sistema. Il grassetto è un <b> dentro quel font, non un
+  // font-weight calcolato: basta verificarne la presenza. L'attributo
+  // color è già una stringa hex letterale (nessuna CSS var() da risolvere
+  // qui), leggibile anche da un nodo clonato scollegato — a differenza di
+  // resolveMsgStyle (chat live) non serve leggerlo dall'originale ancora
+  // agganciato al documento.
+  function resolveSalvataMsgStyle(wrap, timeFontClone) {
+    const colorFont = Array.from(wrap.querySelectorAll('font[color]')).find((f) => f !== timeFontClone);
+    if (!colorFont) return { color: null, bold: false };
+    return { color: colorFont.getAttribute('color'), bold: !!colorFont.querySelector('b') };
+  }
+
   function parseBlock(timeFont, restNodes, baseDoc) {
     const timeMatch = timeFont.textContent.match(/(\d{2}:\d{2})/);
     const time = timeMatch ? timeMatch[1] : null;
 
     const wrap = baseDoc.createElement('div');
-    wrap.appendChild(timeFont.cloneNode(true));
+    const timeFontClone = timeFont.cloneNode(true);
+    wrap.appendChild(timeFontClone);
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
+    const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
     const speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    // Link reale che lot mette sull'icona razza (avatar.asp?id=NICK) — un
+    // drago non ce l'ha (icona senza <a>, coerente con niente speaker).
+    const razzaLinkEl = razzaImg ? razzaImg.closest('a') : null;
+    const razzaLink = razzaLinkEl ? razzaLinkEl.getAttribute('href') : null;
     const stemmaImg = wrap.querySelector('img[src*="/stemmi/"]');
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
+
+    // Segnale giusto per il tipo, trovato confrontando esempi reali (non il
+    // grassetto, sempre presente sul nick anche nei messaggi normali): lo
+    // stemma (censoUrl) compare SOLO nei messaggi normali ('N') — stessa
+    // regola del client live, dove renderStemma() viene chiamato solo per
+    // 'N' e mai per '+'/'S'/'6'. Un drago (nessuna icona speaker, nessuno
+    // stemma) ricade quindi correttamente su 'azione', non 'normale'. La
+    // dichiarazione oggetti ("Certifica Possesso") resta riconoscibile
+    // dagli stessi link con target="new" già usati in parseTavernaMsgEl.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
 
     const coordSpan = wrap.querySelector('span.msg-pos-tag');
     const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
@@ -421,7 +511,18 @@
     wrap.querySelectorAll(
       'span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, span.msg-tag-med, img, a[href*="avatar.asp"]'
     ).forEach((el) => el.remove());
-    wrap.querySelectorAll('font[color="#606060"]').forEach((el) => el.remove());
+    // Rimuove SOLO il font del timestamp (per identità, stesso motivo di
+    // resolveSalvataMsgStyle sopra) — non "tutti i font grigi": un
+    // messaggio come quello di un drago in mutaforma ha il proprio font di
+    // contenuto anch'esso colorato #606060, e un filtro per colore lo
+    // cancellava insieme al timestamp lasciando il testo vuoto.
+    timeFontClone.remove();
+    // Per 'equip' (certifica oggetti): estratta PRIMA di appiattire a testo
+    // — a quel punto wrap contiene solo testo + i veri <a target="new">
+    // verso i certificati, niente altro chrome. Il primo run è sempre il
+    // nome (nessun nodo separato lo isola da qui), tolto sotto come per il
+    // prefisso testuale di "testo".
+    const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     if (speaker && testo.startsWith(speaker)) {
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
@@ -438,8 +539,8 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -502,7 +603,7 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
-  // Colore "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
+  // Stile "del messaggio" così come lo mostra lot: per i tipi '+'/'S'/'6'
   // il client avvolge tutto (nick+testo) in un unico <span style="color:
   // ...">, spesso personalizzato (es. rosso per i master) — è quello lo
   // span da leggere, non il nick. Il tipo 'N' non ha un colore proprio per
@@ -511,16 +612,20 @@
   // già le CSS var() (--testo-msg ecc.) al valore rgb() reale corrente —
   // ma solo su un nodo ancora agganciato al documento, mai su un clone
   // scollegato: va chiamato PRIMA di clonare l'elemento in parseTavernaMsgEl.
-  function resolveMsgColor(el) {
+  // bold: font-weight ereditato dallo stesso span (es. .msg-azione è
+  // bold via CSS di classe, non inline — getComputedStyle lo risolve lo
+  // stesso perché il nodo è ancora nel documento).
+  function resolveMsgStyle(el) {
     const bodySpan = Array.from(el.children).find((c) => (
       c.tagName === 'SPAN' && c.style && c.style.color
       && !c.classList.contains('msg-ora') && !c.classList.contains('msg-nick')
     ));
-    return getComputedStyle(bodySpan || el).color || null;
+    const cs = getComputedStyle(bodySpan || el);
+    return { color: cs.color || null, bold: parseInt(cs.fontWeight, 10) >= 700 };
   }
 
   function parseTavernaMsgEl(el) {
-    const msgColor = resolveMsgColor(el);
+    const msgStyle = resolveMsgStyle(el);
     const wrap = el.cloneNode(true);
 
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
@@ -555,6 +660,11 @@
 
     const razzaImg = wrap.querySelector('img.msg-razza');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
+    // Link reale che lot mette sull'icona razza (javascript:void(window.
+    // open('../ARMInew26.asp?ID=NICK...'))) — un drago non ce l'ha (icona
+    // senza <a>, coerente con niente speaker).
+    const razzaLinkEl = razzaImg ? razzaImg.closest('a') : null;
+    const razzaLink = razzaLinkEl ? razzaLinkEl.getAttribute('href') : null;
     const stemmaImg = wrap.querySelector('img.msg-stemma');
     const censoUrl = stemmaImg ? stemmaImg.getAttribute('src') : null;
 
@@ -584,6 +694,10 @@
     wrap.querySelectorAll(
       'span.msg-ora, span.msg-nick, span.msg-pos-tag, span.msg-tag-pos, span.msg-tag-status, span.msg-tag-arcani, span.msg-tag-png, span.msg-tag-fato, span.msg-tag-missione, img'
     ).forEach((n) => n.remove());
+    // Per 'equip' (certifica oggetti): estratta PRIMA di appiattire a testo
+    // — a quel punto wrap contiene solo testo + i veri <a target="new">
+    // verso i certificati, niente altro chrome.
+    const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
     // Per azione/skill/dado il nick (con eventuale "carica" davanti) resta
     // incollato dentro il testo — .msg-nick esiste solo per i messaggi
@@ -600,8 +714,8 @@
     const unsupportedType = !speaker;
 
     return {
-      time, speaker: speaker || 'Sistema', razzaIcon, censoUrl, coordRaw, posLabel, tags, med, testo,
-      unsupportedType, msgType, msgColor,
+      time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
     };
   }
 
@@ -798,8 +912,12 @@
     return 'https://www.extremelot.eu/lotnew/img/razze/' + razza.toUpperCase() + (sesso === 'Femmina' ? 'F' : 'M') + '.gif';
   }
 
-  // Avatar della card: censo reale (stemma) se disponibile, altrimenti
-  // iniziale del nome su sfondo colore-identità.
+  // Avatar della card: censo reale (stemma) se disponibile; altrimenti,
+  // per un parlante non riconosciuto (msg.unsupportedType — es. un drago:
+  // niente link avatar nel DOM, lot nasconde apposta il vero PG dietro la
+  // mutaforma, non risalibile), l'icona razza del messaggio stesso se
+  // presente (pg.iconUrl, vedi placeholder in draw()) invece di un badge
+  // muto; solo come ultima risorsa l'iniziale del nome su sfondo colore.
   function fillAvatar(el, pg) {
     el.innerHTML = '';
     if (pg.censoUrl) {
@@ -809,6 +927,14 @@
       img.alt = '';
       img.draggable = false;
       img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+      el.appendChild(img);
+    } else if (pg.iconUrl) {
+      el.style.background = pgAccentColor(pg.nome);
+      const img = document.createElement('img');
+      img.src = pg.iconUrl;
+      img.alt = '';
+      img.draggable = false;
+      img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
       el.appendChild(img);
     } else {
       el.style.background = pgAccentColor(pg.nome);
@@ -1774,25 +1900,48 @@
     // impostano msgType (undefined): invert resta false, comportamento
     // invariato.
     //
-    // borderColor (msg.msgColor, solo per i '+'): non tocchiamo più
-    // sfondo/testo del fumetto (resa peggiore, si torna alla palette del
-    // viewer), ma il bordo sì — evidenzia a colpo d'occhio i messaggi
-    // azione col colore reale con cui li mostra lot, rosso di un master
-    // compreso, senza confondersi con quelli normali (bordo neutro COLOR_LINE).
+    // borderColor/borderBold (msg.msgColor/msg.msgBold, sempre — replay e
+    // live): non tocchiamo più sfondo/testo del fumetto (resa peggiore, si
+    // torna alla palette del viewer), ma il bordo sì, sempre col colore
+    // reale con cui lot mostra quel preciso messaggio — rosso di un master
+    // compreso — invece del neutro COLOR_LINE fisso. Un bordo più spesso
+    // quando lot lo mostra in grassetto (es. .msg-azione in live, <b> in
+    // replay): stesso "richiamo" allo stile originale, ma solo sul bordo —
+    // meno invasivo di copiare anche sfondo/font, resta leggibile.
     //
     // singleBlock (msg.msgType === 'equip'): dichiarazione oggetti, un
     // elenco di nomi senza alcuna azione/parlato al suo interno — un unico
-    // blocco, niente split.
-    function buildSpeechBubbles(text, invert, borderColor, singleBlock) {
+    // blocco, niente split. richRuns (msg.equipRuns), se presente: gli
+    // oggetti dichiarati sono link reali verso i certificati (stesso
+    // meccanismo della card "Indosso" già cliccabile) — resi come <a>
+    // veri invece di testo piatto, `text` resta il fallback se assente.
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
+      const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
         ].join(';');
-        bubble.textContent = text;
+        if (richRuns && richRuns.length) {
+          richRuns.forEach((run) => {
+            if (run.type === 'link') {
+              const a = document.createElement('a');
+              a.href = run.href;
+              a.target = 'new';
+              a.rel = 'noopener';
+              a.textContent = run.text;
+              a.style.cssText = `color:${COLOR_EMBER};text-decoration:underline;`;
+              bubble.appendChild(a);
+            } else {
+              bubble.appendChild(document.createTextNode(run.value));
+            }
+          });
+        } else {
+          bubble.textContent = text;
+        }
         bubbles.appendChild(bubble);
         return bubbles;
       }
@@ -1801,7 +1950,7 @@
         slot.style.cssText = 'margin-bottom:6px;overflow:hidden;' + (p.type === 'speech' ? 'padding-left:23px;' : 'padding-right:23px;');
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:1.5px solid ${border}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
@@ -1842,7 +1991,25 @@
         raceIcon.alt = '';
         raceIcon.draggable = false;
         raceIcon.style.cssText = 'width:10px;height:10px;flex:0 0 auto;';
-        header.appendChild(raceIcon);
+        // Link reale che lot mette sulla sua icona razza in questo preciso
+        // messaggio (scheda PG in live, avatar.asp in replay) — un drago
+        // non ce l'ha, l'icona resta senza link in quel caso. In live è un
+        // URI javascript: (chiama window.open() da sé, come fa lot stesso)
+        // — target="_blank" lì apre una scheda vuota invece di eseguirlo,
+        // va messo solo sugli href http(s) veri come quello di replay.
+        if (msg.razzaLink) {
+          const raceLink = document.createElement('a');
+          raceLink.href = msg.razzaLink;
+          if (!/^javascript:/i.test(msg.razzaLink)) {
+            raceLink.target = '_blank';
+            raceLink.rel = 'noopener';
+          }
+          raceLink.style.cssText = 'flex:0 0 auto;line-height:0;';
+          raceLink.appendChild(raceIcon);
+          header.appendChild(raceLink);
+        } else {
+          header.appendChild(raceIcon);
+        }
       }
 
       // Tag modali prima della coordinata di griglia: stesso ordine del
@@ -1894,17 +2061,32 @@
         card.appendChild(gapNote);
       }
       if (msg.unsupportedType) {
+        // Un drago è "non riconosciuto" solo nel senso che lot non espone
+        // mai il giocatore reale dietro la mutaforma (per design, non un
+        // limite del parser) — nota diversa da quella generica di sistema/
+        // dado/sussurro, che invece è un vero parlante non identificato.
+        const isDrago = fallbackSpeakerLabel(msg.razzaIcon) === 'Drago';
         const typeNote = document.createElement('div');
-        typeNote.textContent = 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
+        typeNote.textContent = isDrago
+          ? 'Drago: lot non espone il giocatore reale dietro la mutaforma — nessun PG collegabile.'
+          : 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
         typeNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
         card.appendChild(typeNote);
       }
 
+      // Bordo colorato solo su azione/equip: sui messaggi 'N' c'è sempre un
+      // colore disponibile (quello del nick, es. Vivia rosso anche nei suoi
+      // messaggi normali) ma applicarlo lì renderebbe TUTTO evidenziato,
+      // l'opposto del "richiamo leggero, solo sui messaggi che spiccano già
+      // su lot" che era la richiesta originale.
+      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        (msg.msgType === 'azione' || msg.msgType === 'equip') ? msg.msgColor : null,
-        msg.msgType === 'equip'
+        isStyledType ? msg.msgColor : null,
+        isStyledType ? msg.msgBold : false,
+        msg.msgType === 'equip',
+        msg.equipRuns
       ));
 
       return card;
@@ -1964,6 +2146,7 @@
         // meglio una card degradata che farla sparire dalla timeline.
         const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
           nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+          iconUrl: msg.razzaIcon || null,
         };
         sidebarList.appendChild(
           i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
