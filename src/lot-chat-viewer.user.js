@@ -63,7 +63,7 @@
   banner.textContent = 'lot-chat-viewer by Alderick — clicca per mostrare/nascondere';
   banner.title = 'Mostra/nascondi la scena';
   banner.style.cssText = [
-    'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
+    `position:fixed`, `top:${isLive ? '-2px' : '8px'}`, 'right:8px', 'z-index:2147483647',
     'background:#222', 'color:#0f0', 'font:12px monospace', 'cursor:pointer',
     'padding:6px 10px', 'border-radius:4px', 'opacity:0.85',
   ].join(';');
