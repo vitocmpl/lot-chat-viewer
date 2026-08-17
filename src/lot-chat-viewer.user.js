@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.84
+// @version      0.0.85
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -931,6 +931,23 @@
     // verso i certificati, niente altro chrome.
     const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
+
+    // Desiderio al Pozzo dei Desideri: riga automatica generata da quella
+    // locazione quando un PG esprime un desiderio ("Al Pozzo dei Desideri
+    // NICK : 'desiderio'"), tipo '+' come un'azione normale ma — a
+    // differenza di ogni altro '+' — senza alcuna icona/link di parlante
+    // nel markup live: ricadrebbe su "Sistema" senza questo riconoscimento
+    // dedicato. In replay lo stesso desiderio ha invece un link avatar
+    // reale (nessun caso speciale necessario lì). Specifico di questa
+    // locazione: se ricompare altrove con un prefisso diverso, va esteso.
+    if (!speaker && msgType === 'azione') {
+      const wishMatch = testo.match(/^Al Pozzo dei Desideri\s+(.+?)\s*:\s*'(.*)'\s*$/);
+      if (wishMatch) {
+        speaker = wishMatch[1].trim();
+        testo = `'${wishMatch[2].trim()}'`;
+      }
+    }
+
     // Skill (msg-skill): il nick del PG compare DENTRO la narrazione (es.
     // "Il corpo del Vampiro Alderick diviene..."), non come prefisso — lo
     // strip generico sotto (pensato per azione/dado, dove il nick precede
