@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.82
+// @version      0.0.83
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2502,17 +2502,20 @@
       const isWhisperPreview = msg.msgType === 'sussurro';
       const isDicePreview = msg.msgType === 'dado';
       const isSkillPreview = msg.msgType === 'skill';
-      const isFatoPreview = msg.msgType === 'fato';
       const isImmaginePreview = msg.msgType === 'immagine';
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
+      // Fato: niente prefisso "Fato: " né colore/peso dedicati — il nome
+      // "Fato" è già la riga sopra (nm, pg.nome), qui basta il formato
+      // standard come per un PG qualunque. COLOR_FATO (#502020, un rosso
+      // mattone scuro) è pensato per un bordo su sfondo chiaro, non per il
+      // testo su questo sfondo scuro: illeggibile se usato qui.
       pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
         : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
         : isSkillPreview ? `Skill: ${preview}`
-        : isFatoPreview ? `Fato: ${preview}`
         : isImmaginePreview ? 'Immagine'
         : preview;
-      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : isFatoPreview ? COLOR_FATO : COLOR_TEXT_DIM};font-style:${isWhisperPreview || isImmaginePreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview || isFatoPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : COLOR_TEXT_DIM};font-style:${isWhisperPreview || isImmaginePreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
