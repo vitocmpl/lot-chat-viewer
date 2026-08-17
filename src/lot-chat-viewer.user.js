@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.83
+// @version      0.0.84
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -991,9 +991,18 @@
     '—', chatParsed.messages.length, 'messaggi');
   // I messaggi con parlante non riconosciuto (unsupportedType, vedi
   // parseBlock) restano nella timeline con un'etichetta placeholder, ma
-  // non sono un vero PG: niente fetch scheda/aspetto per loro.
+  // non sono un vero PG: niente fetch scheda/aspetto per loro. Stesso
+  // discorso per Fato/Immagine: "speaker" lì è un nome fisso condiviso da
+  // messaggi diversi (ogni Fato/Immagine è un contenuto a sé, non un vero
+  // PG), quindi vanno esclusi dal roster — altrimenti buildPGRecord ne
+  // costruirebbe UN SOLO record condiviso (censoUrl del primo trovato in
+  // buildChatDerivedRoster), che tutti i messaggi di quel tipo si
+  // ritroverebbero addosso al posto della propria immagine reale, oltre a
+  // fare un fetch inutile di scheda/aspetto per un nome PG che non esiste.
   const roster = Array.from(new Set(
-    chatParsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+    chatParsed.messages
+      .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine')
+      .map((m) => m.speaker)
   ));
   console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
   console.log('[lot-chat-viewer] primi 8 messaggi:', JSON.stringify(chatParsed.messages.slice(0, 8), null, 2));
@@ -2647,8 +2656,12 @@
       const parsed = parseChatTaverna(liveContainer);
       if (!parsed.messages.length) return;
       const chatDerivedRoster = buildChatDerivedRoster(parsed.messages);
+      // Stessa esclusione Fato/Immagine del roster iniziale più sopra —
+      // vedi commento lì per il perché.
       const liveRoster = Array.from(new Set(
-        parsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+        parsed.messages
+          .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine')
+          .map((m) => m.speaker)
       ));
       Promise.all([
         Promise.all(liveRoster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
