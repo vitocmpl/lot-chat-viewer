@@ -76,13 +76,14 @@ Replay di una chat salvata:
 - Personaggi come stemma compatto (zoom basso) o modellino intero a layer corpo/vestito (zoom alto), con ventaglio automatico quando più PG condividono una cella, PG che sta parlando evidenziato (cella colorata, e sul modellino intero anche freccia + glow)
 - Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
-- Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro) restano visibili con una nota, invece di sparire in silenzio
+- Messaggi con parlante non riconoscibile (es. sistema/dado) restano visibili con una nota, invece di sparire in silenzio
 - Luoghi senza mappa disponibile (es. Covo): scena solo testo/fumetti con la nostra grafica, senza riquadro mappa/griglia/token
+- Sussurri (live e replay): parlante riconosciuto, blocco dedicato con bordo tratteggiato ed etichetta ("sussurra a ...") a marcarli come effimeri/privati rispetto ai messaggi pubblici
 
 Non ancora presente:
 
 - Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
-- Sussurri e messaggi di moderazione/admin in chat live: restano visibili ma senza parlante riconosciuto ("Sistema")
+- Messaggi di moderazione/admin in chat live: restano visibili ma senza parlante riconosciuto ("Sistema")
 
 Vedi le issue del repo per lo stato di avanzamento dettagliato.
 

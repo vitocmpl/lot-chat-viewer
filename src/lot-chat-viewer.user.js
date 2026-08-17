@@ -449,6 +449,35 @@
     wrap.appendChild(timeFontClone);
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
+    // Sussurro (chat salvata): unico tipo di messaggio renderizzato come
+    // <table> invece del solito flusso di <font>/<span> — niente link
+    // avatar.asp (il path generico sotto lo tratterebbe come parlante non
+    // riconosciuto, "Sistema"), il parlante si legge dal <b> in grassetto
+    // della prima riga ("NICK sussurra a  DESTINATARIO"), il testo dalla
+    // seconda riga. Nessun altro esempio reale di variante sotto mano (es.
+    // il lato "tu sussurri a qualcuno"): se il markup differisse ricadrebbe
+    // sul path generico invece di un buco silenzioso.
+    const sussurroTable = wrap.querySelector('table');
+    if (sussurroTable && /\bsussurra a\b/i.test(sussurroTable.textContent)) {
+      const rows = Array.from(sussurroTable.querySelectorAll('tr'));
+      const headerRow = rows[0] || null;
+      const bodyRow = rows[1] || null;
+      const boldEl = headerRow ? headerRow.querySelector('b') : null;
+      const speaker = boldEl ? decodeEntitiesOnce(boldEl.textContent).trim() : null;
+      const headerText = headerRow ? decodeEntitiesOnce(headerRow.textContent).replace(/\s+/g, ' ').trim() : '';
+      const targetMatch = headerText.match(/sussurra a\s+(.+)$/i);
+      const target = targetMatch ? targetMatch[1].trim() : null;
+      const testo = bodyRow ? decodeEntitiesOnce(bodyRow.textContent).replace(/\s+/g, ' ').trim() : '';
+      if (!time && !testo) return null;
+      return {
+        time, speaker: speaker || fallbackSpeakerLabel(null), razzaIcon: null, razzaLink: null, censoUrl: null,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo,
+        equipRuns: null, unsupportedType: !speaker, msgType: 'sussurro',
+        sussurroLabel: target ? `sussurra a ${target}` : 'sussurro',
+        msgColor: null, msgBold: false,
+      };
+    }
+
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
     let speaker = speakerFromBlock(wrap);
 
@@ -640,6 +669,34 @@
   function parseTavernaMsgEl(el) {
     const msgStyle = resolveMsgStyle(el);
     const wrap = el.cloneNode(true);
+
+    // Sussurro (chat live): struttura dedicata (.msg-sussurro), separata dal
+    // flusso normale perché è effimero e visibile solo a chi lo manda e chi
+    // lo riceve — niente span.msg-ora (nessun orario riportato) né link
+    // ARMInew26 sul nick, il parlante si legge dall'onclick del client
+    // (ChatTaverne.startSussurro('NICK') sul suo .msg-nick). L'unico esempio
+    // osservato è il lato ricezione ("NICK si avvicina e Vi sussurra:"): se
+    // lot rendesse il lato invio ("stai sussurrando a...") con un markup
+    // diverso, ricadrebbe sul path generico sotto (unsupportedType,
+    // "Sistema") invece di un buco silenzioso.
+    if (el.classList.contains('msg-sussurro')) {
+      const nickEl = wrap.querySelector('.msg-sussurro-header .msg-nick');
+      const onclickAttr = nickEl ? (nickEl.getAttribute('onclick') || '') : '';
+      const speakerMatch = onclickAttr.match(/startSussurro\('([^']+)'\)/);
+      const speaker = speakerMatch ? speakerMatch[1] : null;
+      const headerSpans = Array.from(wrap.querySelectorAll('.msg-sussurro-header > span'));
+      const noteSpan = headerSpans.find((s) => !s.classList.contains('msg-nick'));
+      const sussurroLabel = noteSpan ? decodeEntitiesOnce(noteSpan.textContent).replace(/:\s*$/, '').trim() : null;
+      const bodyEl = wrap.querySelector('.msg-sussurro-body');
+      const testo = bodyEl ? decodeEntitiesOnce(bodyEl.textContent).replace(/\s+/g, ' ').trim() : '';
+      if (!speaker && !testo) return null;
+      return {
+        time: null, speaker: speaker || fallbackSpeakerLabel(null), razzaIcon: null, razzaLink: null, censoUrl: null,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo,
+        equipRuns: null, unsupportedType: !speaker, msgType: 'sussurro', sussurroLabel,
+        msgColor: null, msgBold: false,
+      };
+    }
 
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
@@ -1025,6 +1082,11 @@
     const COLOR_GOLD = '#d9b86a';
     const COLOR_TEXT = '#ece3d6';
     const COLOR_TEXT_DIM = '#a89a89';
+    // Solo per i sussurri: un accento diverso dalla palette ember/gold del
+    // resto (bordo tratteggiato + questo colore), per farli riconoscere a
+    // colpo d'occhio come "diversi" — effimeri, visibili solo a mittente e
+    // destinatario, non un vero messaggio pubblico in chat.
+    const COLOR_WHISPER = '#8a6fa8';
 
     // In-flow (non fixed): va esattamente al posto di .lot-chat, non
     // sopra a tutta la pagina — un overlay fixed a schermo intero
@@ -1963,15 +2025,17 @@
     // oggetti dichiarati sono link reali verso i certificati (stesso
     // meccanismo della card "Indosso" già cliccabile) — resi come <a>
     // veri invece di testo piatto, `text` resta il fallback se assente.
-    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns) {
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
       const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`,
+          `border:${borderWidth} ${dashed ? 'dashed' : 'solid'} ${border}`,
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
+          dashed ? 'font-style:italic;' : '',
         ].join(';');
         if (richRuns && richRuns.length) {
           richRuns.forEach((run) => {
@@ -2099,7 +2163,7 @@
       }
 
       const time = document.createElement('div');
-      time.textContent = msg.time;
+      time.textContent = msg.time || '';
       time.style.cssText = `font-size:10.5px;font-weight:600;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;`;
       header.appendChild(time);
 
@@ -2131,13 +2195,21 @@
       // l'opposto del "richiamo leggero, solo sui messaggi che spiccano già
       // su lot" che era la richiesta originale.
       const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
+      const isWhisper = msg.msgType === 'sussurro';
+      if (isWhisper && msg.sussurroLabel) {
+        const whisperLabel = document.createElement('div');
+        whisperLabel.textContent = msg.sussurroLabel;
+        whisperLabel.style.cssText = `font-size:10.5px;font-style:italic;color:${COLOR_WHISPER};`;
+        card.appendChild(whisperLabel);
+      }
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        isStyledType ? msg.msgColor : null,
+        isWhisper ? COLOR_WHISPER : (isStyledType ? msg.msgColor : null),
         isStyledType ? msg.msgBold : false,
-        msg.msgType === 'equip',
-        msg.equipRuns
+        msg.msgType === 'equip' || isWhisper,
+        msg.equipRuns,
+        isWhisper
       ));
 
       return card;
@@ -2168,15 +2240,17 @@
       const nm = document.createElement('div');
       nm.textContent = pg.nome;
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
+      const isWhisperPreview = msg.msgType === 'sussurro';
       const pv = document.createElement('div');
-      pv.textContent = splitSegments(msg.testo).map((p) => p.content).join(' ');
-      pv.style.cssText = `font-size:10.5px;color:${COLOR_TEXT_DIM};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
+      pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}` : preview;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
 
       const time = document.createElement('div');
-      time.textContent = msg.time;
+      time.textContent = msg.time || '';
       time.style.cssText = `font-size:10px;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;flex:0 0 auto;`;
       row.appendChild(time);
 
