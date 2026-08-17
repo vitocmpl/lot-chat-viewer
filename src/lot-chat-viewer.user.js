@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.77
+// @version      0.0.78
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2103,12 +2103,12 @@
     // meccanismo della card "Indosso" già cliccabile) — resi come <a>
     // veri invece di testo piatto, `text` resta il fallback se assente.
     //
-    // squared (dado/skill): sono narrazione/notifica di sistema, non
-    // dialogo — stesso bordo squadrato+corsivo dei fumetti "azione" nello
-    // split normale (border-radius:3px), non quello stondato "parlato"
-    // (border-radius:14px) che il resto dei singleBlock (equip) usa di
-    // default. dashed (sussurro) resta un caso a parte: tratteggiato, non
-    // squadrato.
+    // squared (equip/dado/skill): sono descrizione/narrazione/notifica di
+    // sistema, mai dialogo — stesso bordo squadrato+corsivo dei fumetti
+    // "azione" nello split normale (border-radius:3px), non quello
+    // stondato "parlato" (border-radius:14px). dashed (sussurro) resta un
+    // caso a parte: tratteggiato, non squadrato (è comunque testo diretto
+    // di un PG, non una descrizione di sistema).
     function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed, squared) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
@@ -2322,7 +2322,7 @@
           { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
         ] : msg.equipRuns,
         isWhisper,
-        isDice || isSkill
+        isDice || isSkill || msg.msgType === 'equip'
       ));
 
       return card;
