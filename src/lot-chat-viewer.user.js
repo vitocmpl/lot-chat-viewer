@@ -718,7 +718,11 @@
         const imageUrl = immagineImg.getAttribute('src');
         if (imageUrl) {
           messages.push({
-            time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: null,
+            // censoUrl = imageUrl: stesso trucco usato per l'anello del
+            // Fato, così fillAvatar() mostra da sé una miniatura
+            // dell'immagine come icona in timeline (compatta ed
+            // espansa), senza duplicare quella logica qui.
+            time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: imageUrl,
             coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
             equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
             msgColor: null, msgBold: false,
@@ -840,8 +844,11 @@
       const img = wrap.querySelector('img');
       const imageUrl = img ? img.getAttribute('src') : null;
       if (!imageUrl) return null;
+      // censoUrl = imageUrl: stesso trucco usato per l'anello del Fato,
+      // così fillAvatar() mostra da sé una miniatura dell'immagine come
+      // icona in timeline (compatta ed espansa).
       return {
-        time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: null,
+        time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: imageUrl,
         coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
         equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
         msgColor: null, msgBold: false,
@@ -2423,15 +2430,18 @@
         card.appendChild(fatoLabel);
       }
       // Immagine: niente fumetto di testo (msg.testo è vuoto per questo
-      // tipo), lot mostra l'illustrazione stessa al centro della chat — la
-      // mostriamo così com'è, invece di forzarla nel box parlato/azione.
+      // tipo), lot mostra l'illustrazione stessa al centro della chat — qui
+      // una thumbnail più piccola, zoomabile nello stesso lightbox già
+      // usato per il ritratto della scheda PG (openAvatarLightbox), invece
+      // di forzarla intera nel box parlato/azione o duplicare l'overlay.
       if (isImmagine && msg.imageUrl) {
-        const imgEl = document.createElement('img');
-        imgEl.src = msg.imageUrl;
-        imgEl.alt = '';
-        imgEl.draggable = false;
-        imgEl.style.cssText = `max-width:100%;display:block;border-radius:8px;border:1.5px solid ${COLOR_LINE};`;
-        card.appendChild(imgEl);
+        const thumb = document.createElement('img');
+        thumb.src = msg.imageUrl;
+        thumb.alt = '';
+        thumb.draggable = false;
+        thumb.style.cssText = `max-width:220px;max-height:160px;display:block;border-radius:8px;border:1.5px solid ${COLOR_LINE};cursor:zoom-in;`;
+        thumb.addEventListener('click', () => openAvatarLightbox(msg.imageUrl, 'Immagine'));
+        card.appendChild(thumb);
       } else {
         // Dado: icona d20 reale di lot + risultato in evidenza invece del
         // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
