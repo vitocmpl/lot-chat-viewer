@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.75
+// @version      0.0.76
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2091,7 +2091,14 @@
     // oggetti dichiarati sono link reali verso i certificati (stesso
     // meccanismo della card "Indosso" già cliccabile) — resi come <a>
     // veri invece di testo piatto, `text` resta il fallback se assente.
-    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed) {
+    //
+    // squared (dado/skill): sono narrazione/notifica di sistema, non
+    // dialogo — stesso bordo squadrato+corsivo dei fumetti "azione" nello
+    // split normale (border-radius:3px), non quello stondato "parlato"
+    // (border-radius:14px) che il resto dei singleBlock (equip) usa di
+    // default. dashed (sussurro) resta un caso a parte: tratteggiato, non
+    // squadrato.
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed, squared) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
       const borderWidth = borderBold ? '3px' : '1.5px';
@@ -2100,8 +2107,9 @@
         bubble.style.cssText = [
           `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`,
           `border:${borderWidth} ${dashed ? 'dashed' : 'solid'} ${border}`,
-          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
-          dashed ? 'font-style:italic;' : '',
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
+          `border-radius:${squared ? '3px' : '10px'}`,
+          (dashed || squared) ? 'font-style:italic;' : '',
         ].join(';');
         if (richRuns && richRuns.length) {
           richRuns.forEach((run) => {
@@ -2302,7 +2310,8 @@
           { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
           { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
         ] : msg.equipRuns,
-        isWhisper
+        isWhisper,
+        isDice || isSkill
       ));
 
       return card;
