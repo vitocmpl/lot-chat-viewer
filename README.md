@@ -77,6 +77,7 @@ Replay di una chat salvata (`chat_salvate*.asp`):
 - Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
 - Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro) restano visibili con una nota, invece di sparire in silenzio
+- Luoghi senza mappa disponibile (es. Covo): scena solo testo/fumetti con la nostra grafica, senza riquadro mappa/griglia/token
 
 Non ancora presente:
 

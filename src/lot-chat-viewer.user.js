@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.68
+// @version      0.0.69
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -976,10 +976,11 @@
   function renderTimeline(chatParsed, pgRecords, mappa, opts) {
     opts = opts || {};
     const mode = opts.mode || 'replay'; // 'replay' (chat_salvate) | 'live' (chat_taverne)
-    if (!mappa.mapUrl) {
-      console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
-      return;
-    }
+    // Non tutti i luoghi hanno una mappa disponibile (es. Covo): niente
+    // early-return in quel caso, la scena si costruisce comunque, solo
+    // senza il riquadro mappa/griglia/token (vedi hasMap più sotto) — solo
+    // testo/fumetti con la nostra grafica, come per il resto della chat.
+    const hasMap = !!mappa.mapUrl;
     const existing = document.getElementById('lot-chat-viewer-scene');
     if (existing) existing.remove();
     if (!chatParsed.messages.length) {
@@ -1238,6 +1239,15 @@
       equipShell.overlay.style.display = 'flex';
     }
 
+    // updateFitScale/applyView/updateTokens sono richiamate anche da
+    // layoutPanel()/draw() più sotto, fuori da questo blocco — pre-
+    // dichiarate qui come no-op, diventano le funzioni vere qui sotto solo
+    // se c'è una mappa da costruire (hasMap).
+    let updateFitScale = () => {};
+    let applyView = () => {};
+    let updateTokens = () => {};
+
+    if (hasMap) {
     // ---------- viewport mappa: pan/zoom in un riquadro quadrato --------
     // wrapper (centra) > viewport (quadrato, pannabile/zoomabile) > zoom
     // (transform pan+scale) > plane (dimensione nativa mappa+margine) >
@@ -1389,10 +1399,10 @@
     ].join(';');
     viewport.appendChild(hoverCoordEl);
 
-    function updateFitScale() {
+    updateFitScale = function() {
       const rect = viewport.getBoundingClientRect();
       fitScale = rect.width > 0 ? (rect.width / (mappa.mapWidth + LABEL_MARGIN_LEFT)) : 1;
-    }
+    };
 
     function renderRuler() {
       rulerCol.innerHTML = '';
@@ -1419,7 +1429,7 @@
       }
     }
 
-    function applyView() {
+    applyView = function() {
       const scale = (fitScale || 1) * view.zoom;
       stageZoom.style.transform = `translate(${view.panX}px,${view.panY}px) scale(${scale})`;
       zoomReadout.textContent = Math.round(view.zoom * 100) + '%';
@@ -1449,20 +1459,13 @@
           updateTokens(chatParsed.messages.slice(0, index + 1), pgRecords, { recenter: false });
         }
       }
-    }
+    };
 
     function resetView() {
       view.zoom = 1; view.panX = 0; view.panY = 0;
       applyView();
     }
     resetViewBtn.addEventListener('click', resetView);
-    // layoutPanel (definita più sotto, ma le funzioni sono hoisted) rifà
-    // anche altezza/top del pannello, non solo fitScale: senza, ingrandire
-    // la finestra (es. popup chat_salvate portato a schermo intero) non
-    // faceva crescere la mappa, restava vincolata all'altezza calcolata al
-    // primo caricamento quando la finestra era ancora piccola.
-    window.addEventListener('resize', () => { layoutPanel(); });
-
     viewport.addEventListener('wheel', (e) => {
       e.preventDefault();
       const rect = viewport.getBoundingClientRect();
@@ -1689,7 +1692,7 @@
       return arrow;
     }
 
-    function updateTokens(messages, pgRecords, opts) {
+    updateTokens = function(messages, pgRecords, opts) {
       const recenter = !opts || opts.recenter !== false;
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
@@ -1844,7 +1847,8 @@
       });
 
       if (recenter) centerOnActiveToken(activePos, compact ? null : activeSpriteEl);
-    }
+    };
+    } // fine if (hasMap)
 
     const sidebar = document.createElement('div');
     sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
@@ -2226,6 +2230,10 @@
       updateFitScale();
       applyView();
     }
+    // Ricalcola anche senza mappa (updateFitScale/applyView sono no-op in
+    // quel caso, ma layoutPanel rifà comunque l'altezza del pannello in
+    // replay) — es. popup chat_salvate portato a schermo intero.
+    window.addEventListener('resize', () => { layoutPanel(); });
     layoutPanel();
     draw();
     sceneVisible = true;
