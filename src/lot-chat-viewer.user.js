@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.73
+// @version      0.0.74
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -325,6 +325,18 @@
   // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
   const MED_ICON_URL = 'https://www.extremelot.eu/lotnew/img/tagmedico.png';
 
+  // Icona d20 reale di lot, usata dal client per i tiri di dado — stesso
+  // sistema del MED_ICON_URL sopra, un'icona presa da lot invece di
+  // inventarne una nostra.
+  const DICE_ICON_URL = 'https://www.extremelot.eu/proc/magioninew/dadi/d20.png';
+
+  // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
+  // (msg-dado, ma il parlante si legge già dal solito link icona razza,
+  // niente bisogno di un branch dedicato come per il sussurro) sia in
+  // replay (nessuna classe/tabella dedicata, stesso testo piatto) — un solo
+  // pattern testuale invece di duplicare la detection nei due parser.
+  const DICE_ROLL_RE = /ha tirato i dadi col risultato di\s*(\d+)\s*su\s*(\d+)/i;
+
   // Spezza una stringa reale nelle sue "pagine" alternate: dentro «» <> ()
   // {} [] e fuori, nell'ordine in cui compaiono nel testo. I tag [...] di
   // metadato (coordinate/tag modali) sono già stati rimossi dal parser
@@ -504,7 +516,7 @@
     // segnale (vedi stesso fix in parseTavernaMsgEl).
     const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
       || /-\s*Al suo arrivo,/.test(wrap.textContent);
-    const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
+    let msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
     // Nessun link avatar per questo tipo di messaggio (vedi sopra): il nome
     // è comunque il primo token del testo ("NICK  - Al suo arrivo, ...").
     if (!speaker && isEquipDeclaration) {
@@ -570,8 +582,21 @@
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
     }
 
+    // Tiro di dadi: nessuna classe/tabella dedicata qui (a differenza del
+    // sussurro), solo lo stesso testo generato da lot già visto in live —
+    // il parlante si legge già dal solito link avatar.asp, come un
+    // messaggio 'azione' qualunque finché non lo si riconosce qui.
+    let diceRoll = null;
+    let diceMax = null;
+    const diceMatch = testo.match(DICE_ROLL_RE);
+    if (diceMatch) {
+      msgType = 'dado';
+      diceRoll = parseInt(diceMatch[1], 10);
+      diceMax = parseInt(diceMatch[2], 10);
+    }
+
     // Non si scarta mai un blocco con un minimo di contenuto solo perché
-    // non riconosciamo il parlante (es. messaggi di sistema/dado/sussurro/
+    // non riconosciamo il parlante (es. messaggi di sistema/sussurro/
     // moderazione — nessun esempio reale sotto mano per sapere come sono
     // fatti): meglio una card "grezza" in timeline che un buco silenzioso
     // nella chat per chi la sta testando. Un blocco davvero vuoto (nessun
@@ -582,7 +607,7 @@
 
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
-      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
     };
   }
 
@@ -723,7 +748,7 @@
     // 'azione' (tipo '+'): si spezza come 'N' ma con i significati
     // invertiti (vedi buildSpeechBubbles). 'normale' ('N' e chat salvate):
     // comportamento invariato.
-    const msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
+    let msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
 
     let speaker = speakerFromTavernaBlock(wrap);
     if (!speaker && isEquipDeclaration) {
@@ -785,12 +810,25 @@
       }
     }
 
+    // Tiro di dadi (msg-dado in live, nessuna classe dedicata in replay):
+    // il parlante si legge già dal solito link icona razza, come un
+    // messaggio 'normale' — solo il testo generato da lot lo distingue,
+    // dopo aver tolto il nome che lo precede qui sopra.
+    let diceRoll = null;
+    let diceMax = null;
+    const diceMatch = testo.match(DICE_ROLL_RE);
+    if (diceMatch) {
+      msgType = 'dado';
+      diceRoll = parseInt(diceMatch[1], 10);
+      diceMax = parseInt(diceMatch[2], 10);
+    }
+
     if (!time && !testo) return null;
     const unsupportedType = !speaker;
 
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
-      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
     };
   }
 
@@ -2047,6 +2085,13 @@
               a.textContent = run.text;
               a.style.cssText = `color:${COLOR_EMBER};text-decoration:underline;`;
               bubble.appendChild(a);
+            } else if (run.type === 'icon') {
+              const icon = document.createElement('img');
+              icon.src = run.src;
+              icon.alt = run.alt || '';
+              icon.draggable = false;
+              icon.style.cssText = 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;';
+              bubble.appendChild(icon);
             } else {
               bubble.appendChild(document.createTextNode(run.value));
             }
@@ -2196,19 +2241,27 @@
       // su lot" che era la richiesta originale.
       const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
       const isWhisper = msg.msgType === 'sussurro';
+      const isDice = msg.msgType === 'dado';
       if (isWhisper && msg.sussurroLabel) {
         const whisperLabel = document.createElement('div');
         whisperLabel.textContent = msg.sussurroLabel;
         whisperLabel.style.cssText = `font-size:10.5px;font-style:italic;color:${COLOR_WHISPER};`;
         card.appendChild(whisperLabel);
       }
+      // Dado: icona d20 reale di lot + risultato in evidenza invece del
+      // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
+      // pubblico (a differenza del sussurro, niente da nascondere), un
+      // bordo dorato pieno basta a farlo notare nella timeline.
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        isWhisper ? COLOR_WHISPER : (isStyledType ? msg.msgColor : null),
-        isStyledType ? msg.msgBold : false,
-        msg.msgType === 'equip' || isWhisper,
-        msg.equipRuns,
+        isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isStyledType ? msg.msgColor : null)),
+        isDice ? true : (isStyledType ? msg.msgBold : false),
+        msg.msgType === 'equip' || isWhisper || isDice,
+        isDice ? [
+          { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
+          { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
+        ] : msg.equipRuns,
         isWhisper
       ));
 
@@ -2241,10 +2294,13 @@
       nm.textContent = pg.nome;
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
       const isWhisperPreview = msg.msgType === 'sussurro';
+      const isDicePreview = msg.msgType === 'dado';
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
-      pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}` : preview;
-      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
+        : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
+        : preview;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
