@@ -76,13 +76,29 @@ Replay di una chat salvata:
 - Personaggi come stemma compatto (zoom basso) o modellino intero a layer corpo/vestito (zoom alto), con ventaglio automatico quando più PG condividono una cella, PG che sta parlando evidenziato (cella colorata, e sul modellino intero anche freccia + glow)
 - Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
-- Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro) restano visibili con una nota, invece di sparire in silenzio
 - Luoghi senza mappa disponibile (es. Covo): scena solo testo/fumetti con la nostra grafica, senza riquadro mappa/griglia/token
+
+### Tipi di messaggio (rispetto a tutti quelli gestiti da `chat_taverne.js`)
+
+Gestiti, con parlante riconosciuto e resa dedicata (live e replay):
+
+- **Normale** — fumetti azione/parlato standard
+- **Azione** (`+`) — stessi fumetti dei normali, ma coi due significati scambiati (fuori parentesi è l'azione, dentro è il parlato) — bordo evidenziato col colore reale con cui lot mostra quel messaggio (es. rosso per un master)
+- **Dichiarazione oggetti** ("Certifica Possesso in Gioco") — blocco unico, oggetti come link cliccabili ai certificati reali
+- **Tiro di dadi** (`6`) — blocco unico squadrato (stile azione, non stondato come il parlato), icona d20 reale di lot + risultato in evidenza ("Tiro di dadi: X su Y") invece del testo grezzo, bordo dorato
+- **Skill** (`S`) — blocco unico squadrato, etichetta "Skill" ed evidenziato col colore reale con cui lot mostra quel preciso messaggio
+- **Sussurro** (`@`) — blocco unico con bordo tratteggiato ed etichetta ("sussurra a ...") a marcarlo come effimero/privato rispetto ai messaggi pubblici
+
+Non ancora gestiti — visibili in timeline ma senza parlante riconosciuto ("Sistema") né stile dedicato, nessun esempio reale sotto mano per implementarli:
+
+- **Moderazione** (`M`)
+- **Admin/azione speciale** (`A`)
+- **Immagine** (`I`)
+- **Fato/destino** (`Z`)
 
 Non ancora presente:
 
 - Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
-- Sussurri e messaggi di moderazione/admin in chat live: restano visibili ma senza parlante riconosciuto ("Sistema")
 
 Vedi le issue del repo per lo stato di avanzamento dettagliato.
 

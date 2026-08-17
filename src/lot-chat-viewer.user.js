@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.71
+// @version      0.0.78
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -325,6 +325,26 @@
   // già puntata a tagmedico.png — nessuno dei due rompe nulla se assente.
   const MED_ICON_URL = 'https://www.extremelot.eu/lotnew/img/tagmedico.png';
 
+  // Icona d20 reale di lot, usata dal client per i tiri di dado — stesso
+  // sistema del MED_ICON_URL sopra, un'icona presa da lot invece di
+  // inventarne una nostra.
+  const DICE_ICON_URL = 'https://www.extremelot.eu/proc/magioninew/dadi/d20.png';
+
+  // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
+  // (msg-dado, ma il parlante si legge già dal solito link icona razza,
+  // niente bisogno di un branch dedicato come per il sussurro) sia in
+  // replay (nessuna classe/tabella dedicata, stesso testo piatto) — un solo
+  // pattern testuale invece di duplicare la detection nei due parser.
+  const DICE_ROLL_RE = /ha tirato i dadi col risultato di\s*(\d+)\s*su\s*(\d+)/i;
+
+  // Uso di skill: lot antepone sempre questo prefisso letterale al testo di
+  // narrazione, sia in live che in replay — a differenza del dado, il nick
+  // del PG compare DENTRO la frase (es. "Il corpo del Vampiro Alderick
+  // diviene..."), spesso ben oltre i 40 caratteri usati altrove come soglia
+  // euristica per "è un prefisso, toglilo": va rilevato PRIMA di quello
+  // strip generico, altrimenti lo spezza a metà frase.
+  const SKILL_PREFIX_RE = /^\[SKILL\]\s*/i;
+
   // Spezza una stringa reale nelle sue "pagine" alternate: dentro «» <> ()
   // {} [] e fuori, nell'ordine in cui compaiono nel testo. I tag [...] di
   // metadato (coordinate/tag modali) sono già stati rimossi dal parser
@@ -401,10 +421,17 @@
     return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
   }
 
+  // Un nick PG reale non contiene mai spazi/virgolette/parentesi angolari:
+  // il taglio va oltre il solito '&' perché lot genera, SOLO per lo
+  // speaker delle skill in replay, un href malformato — un <img> annidato
+  // per errore dentro il valore dell'attributo invece che come figlio
+  // dell'<a> (es. href="../avatar.asp?id=Alderick target=result><IMG
+  // SRC=...") — che senza questo taglio extra fa leggere come nick
+  // "Alderick target=result><IMG SRC=" invece del solo "Alderick".
   function speakerFromBlock(wrap) {
     const avatarLink = wrap.querySelector('a[href*="avatar.asp?id="]');
     if (!avatarLink) return null;
-    const m = avatarLink.getAttribute('href').match(/id=([^&]+)/);
+    const m = avatarLink.getAttribute('href').match(/id=([^&\s<>"']+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
 
@@ -449,6 +476,35 @@
     wrap.appendChild(timeFontClone);
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
+    // Sussurro (chat salvata): unico tipo di messaggio renderizzato come
+    // <table> invece del solito flusso di <font>/<span> — niente link
+    // avatar.asp (il path generico sotto lo tratterebbe come parlante non
+    // riconosciuto, "Sistema"), il parlante si legge dal <b> in grassetto
+    // della prima riga ("NICK sussurra a  DESTINATARIO"), il testo dalla
+    // seconda riga. Nessun altro esempio reale di variante sotto mano (es.
+    // il lato "tu sussurri a qualcuno"): se il markup differisse ricadrebbe
+    // sul path generico invece di un buco silenzioso.
+    const sussurroTable = wrap.querySelector('table');
+    if (sussurroTable && /\bsussurra a\b/i.test(sussurroTable.textContent)) {
+      const rows = Array.from(sussurroTable.querySelectorAll('tr'));
+      const headerRow = rows[0] || null;
+      const bodyRow = rows[1] || null;
+      const boldEl = headerRow ? headerRow.querySelector('b') : null;
+      const speaker = boldEl ? decodeEntitiesOnce(boldEl.textContent).trim() : null;
+      const headerText = headerRow ? decodeEntitiesOnce(headerRow.textContent).replace(/\s+/g, ' ').trim() : '';
+      const targetMatch = headerText.match(/sussurra a\s+(.+)$/i);
+      const target = targetMatch ? targetMatch[1].trim() : null;
+      const testo = bodyRow ? decodeEntitiesOnce(bodyRow.textContent).replace(/\s+/g, ' ').trim() : '';
+      if (!time && !testo) return null;
+      return {
+        time, speaker: speaker || fallbackSpeakerLabel(null), razzaIcon: null, razzaLink: null, censoUrl: null,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo,
+        equipRuns: null, unsupportedType: !speaker, msgType: 'sussurro',
+        sussurroLabel: target ? `sussurra a ${target}` : 'sussurro',
+        msgColor: null, msgBold: false,
+      };
+    }
+
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
     let speaker = speakerFromBlock(wrap);
 
@@ -475,7 +531,7 @@
     // segnale (vedi stesso fix in parseTavernaMsgEl).
     const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
       || /-\s*Al suo arrivo,/.test(wrap.textContent);
-    const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
+    let msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
     // Nessun link avatar per questo tipo di messaggio (vedi sopra): il nome
     // è comunque il primo token del testo ("NICK  - Al suo arrivo, ...").
     if (!speaker && isEquipDeclaration) {
@@ -541,8 +597,30 @@
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
     }
 
+    // Skill: qui il testo inizia già con "[SKILL]" (il nick, se presente,
+    // è dentro la narrazione, non un prefisso — testo.startsWith(speaker)
+    // sopra non scatta comunque su questo caso), quindi basta riconoscere
+    // il prefisso e toglierlo.
+    if (SKILL_PREFIX_RE.test(testo)) {
+      msgType = 'skill';
+      testo = testo.replace(SKILL_PREFIX_RE, '');
+    }
+
+    // Tiro di dadi: nessuna classe/tabella dedicata qui (a differenza del
+    // sussurro), solo lo stesso testo generato da lot già visto in live —
+    // il parlante si legge già dal solito link avatar.asp, come un
+    // messaggio 'azione' qualunque finché non lo si riconosce qui.
+    let diceRoll = null;
+    let diceMax = null;
+    const diceMatch = testo.match(DICE_ROLL_RE);
+    if (diceMatch) {
+      msgType = 'dado';
+      diceRoll = parseInt(diceMatch[1], 10);
+      diceMax = parseInt(diceMatch[2], 10);
+    }
+
     // Non si scarta mai un blocco con un minimo di contenuto solo perché
-    // non riconosciamo il parlante (es. messaggi di sistema/dado/sussurro/
+    // non riconosciamo il parlante (es. messaggi di sistema/sussurro/
     // moderazione — nessun esempio reale sotto mano per sapere come sono
     // fatti): meglio una card "grezza" in timeline che un buco silenzioso
     // nella chat per chi la sta testando. Un blocco davvero vuoto (nessun
@@ -553,7 +631,7 @@
 
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
-      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
     };
   }
 
@@ -612,7 +690,11 @@
   function speakerFromTavernaBlock(el) {
     const link = el.querySelector('a[href*="ARMInew26.asp"]');
     if (!link) return null;
-    const m = link.getAttribute('href').match(/ID=([^&'"]+)/);
+    // Stesso taglio extra (spazi/parentesi angolari) di speakerFromBlock —
+    // qui non si è ancora visto un href malformato analogo, ma è la
+    // stessa identica classe di rischio (nick mai contenente questi
+    // caratteri), meglio prevenirlo che scoprirlo alla prossima skill.
+    const m = link.getAttribute('href').match(/ID=([^&\s<>"']+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
 
@@ -641,6 +723,34 @@
     const msgStyle = resolveMsgStyle(el);
     const wrap = el.cloneNode(true);
 
+    // Sussurro (chat live): struttura dedicata (.msg-sussurro), separata dal
+    // flusso normale perché è effimero e visibile solo a chi lo manda e chi
+    // lo riceve — niente span.msg-ora (nessun orario riportato) né link
+    // ARMInew26 sul nick, il parlante si legge dall'onclick del client
+    // (ChatTaverne.startSussurro('NICK') sul suo .msg-nick). L'unico esempio
+    // osservato è il lato ricezione ("NICK si avvicina e Vi sussurra:"): se
+    // lot rendesse il lato invio ("stai sussurrando a...") con un markup
+    // diverso, ricadrebbe sul path generico sotto (unsupportedType,
+    // "Sistema") invece di un buco silenzioso.
+    if (el.classList.contains('msg-sussurro')) {
+      const nickEl = wrap.querySelector('.msg-sussurro-header .msg-nick');
+      const onclickAttr = nickEl ? (nickEl.getAttribute('onclick') || '') : '';
+      const speakerMatch = onclickAttr.match(/startSussurro\('([^']+)'\)/);
+      const speaker = speakerMatch ? speakerMatch[1] : null;
+      const headerSpans = Array.from(wrap.querySelectorAll('.msg-sussurro-header > span'));
+      const noteSpan = headerSpans.find((s) => !s.classList.contains('msg-nick'));
+      const sussurroLabel = noteSpan ? decodeEntitiesOnce(noteSpan.textContent).replace(/:\s*$/, '').trim() : null;
+      const bodyEl = wrap.querySelector('.msg-sussurro-body');
+      const testo = bodyEl ? decodeEntitiesOnce(bodyEl.textContent).replace(/\s+/g, ' ').trim() : '';
+      if (!speaker && !testo) return null;
+      return {
+        time: null, speaker: speaker || fallbackSpeakerLabel(null), razzaIcon: null, razzaLink: null, censoUrl: null,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo,
+        equipRuns: null, unsupportedType: !speaker, msgType: 'sussurro', sussurroLabel,
+        msgColor: null, msgBold: false,
+      };
+    }
+
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
     // server per questi messaggi, quindi niente speaker via link ARMInew26)
@@ -666,7 +776,7 @@
     // 'azione' (tipo '+'): si spezza come 'N' ma con i significati
     // invertiti (vedi buildSpeechBubbles). 'normale' ('N' e chat salvate):
     // comportamento invariato.
-    const msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
+    let msgType = isEquipDeclaration ? 'equip' : (el.classList.contains('msg-azione') ? 'azione' : 'normale');
 
     let speaker = speakerFromTavernaBlock(wrap);
     if (!speaker && isEquipDeclaration) {
@@ -717,15 +827,39 @@
     // verso i certificati, niente altro chrome.
     const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
-    // Per azione/skill/dado il nick (con eventuale "carica" davanti) resta
+    // Skill (msg-skill): il nick del PG compare DENTRO la narrazione (es.
+    // "Il corpo del Vampiro Alderick diviene..."), non come prefisso — lo
+    // strip generico sotto (pensato per azione/dado, dove il nick precede
+    // davvero il testo) lo troverebbe comunque entro i 40 caratteri e
+    // spezzerebbe la frase a metà. Va riconosciuto ORA, prima dello strip,
+    // per poterlo saltare.
+    const isSkillMsg = SKILL_PREFIX_RE.test(testo);
+    // Per azione/dado il nick (con eventuale "carica" davanti) resta
     // incollato dentro il testo — .msg-nick esiste solo per i messaggi
     // normali (già rimosso sopra). Se conosciamo il parlante dal link
     // dell'icona razza, si toglie tutto fino alla fine del suo nome.
-    if (speaker) {
+    if (speaker && !isSkillMsg) {
       const idx = testo.indexOf(speaker);
       if (idx !== -1 && idx < 40) {
         testo = testo.slice(idx + speaker.length).replace(/^\s*-?\s+/, '');
       }
+    }
+    if (isSkillMsg) {
+      msgType = 'skill';
+      testo = testo.replace(SKILL_PREFIX_RE, '');
+    }
+
+    // Tiro di dadi (msg-dado in live, nessuna classe dedicata in replay):
+    // il parlante si legge già dal solito link icona razza, come un
+    // messaggio 'normale' — solo il testo generato da lot lo distingue,
+    // dopo aver tolto il nome che lo precede qui sopra.
+    let diceRoll = null;
+    let diceMax = null;
+    const diceMatch = testo.match(DICE_ROLL_RE);
+    if (diceMatch) {
+      msgType = 'dado';
+      diceRoll = parseInt(diceMatch[1], 10);
+      diceMax = parseInt(diceMatch[2], 10);
     }
 
     if (!time && !testo) return null;
@@ -733,7 +867,7 @@
 
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
-      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold,
+      equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
     };
   }
 
@@ -1025,6 +1159,11 @@
     const COLOR_GOLD = '#d9b86a';
     const COLOR_TEXT = '#ece3d6';
     const COLOR_TEXT_DIM = '#a89a89';
+    // Solo per i sussurri: un accento diverso dalla palette ember/gold del
+    // resto (bordo tratteggiato + questo colore), per farli riconoscere a
+    // colpo d'occhio come "diversi" — effimeri, visibili solo a mittente e
+    // destinatario, non un vero messaggio pubblico in chat.
+    const COLOR_WHISPER = '#8a6fa8';
 
     // In-flow (non fixed): va esattamente al posto di .lot-chat, non
     // sopra a tutta la pagina — un overlay fixed a schermo intero
@@ -1963,15 +2102,25 @@
     // oggetti dichiarati sono link reali verso i certificati (stesso
     // meccanismo della card "Indosso" già cliccabile) — resi come <a>
     // veri invece di testo piatto, `text` resta il fallback se assente.
-    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns) {
+    //
+    // squared (equip/dado/skill): sono descrizione/narrazione/notifica di
+    // sistema, mai dialogo — stesso bordo squadrato+corsivo dei fumetti
+    // "azione" nello split normale (border-radius:3px), non quello
+    // stondato "parlato" (border-radius:14px). dashed (sussurro) resta un
+    // caso a parte: tratteggiato, non squadrato (è comunque testo diretto
+    // di un PG, non una descrizione di sistema).
+    function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed, squared) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
       const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
         bubble.style.cssText = [
-          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`, `border:${borderWidth} solid ${border}`,
-          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text', 'border-radius:10px',
+          `background:${COLOR_SURFACE}`, `color:${COLOR_TEXT}`,
+          `border:${borderWidth} ${dashed ? 'dashed' : 'solid'} ${border}`,
+          'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
+          `border-radius:${squared ? '3px' : '10px'}`,
+          (dashed || squared) ? 'font-style:italic;' : '',
         ].join(';');
         if (richRuns && richRuns.length) {
           richRuns.forEach((run) => {
@@ -1983,6 +2132,13 @@
               a.textContent = run.text;
               a.style.cssText = `color:${COLOR_EMBER};text-decoration:underline;`;
               bubble.appendChild(a);
+            } else if (run.type === 'icon') {
+              const icon = document.createElement('img');
+              icon.src = run.src;
+              icon.alt = run.alt || '';
+              icon.draggable = false;
+              icon.style.cssText = 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;';
+              bubble.appendChild(icon);
             } else {
               bubble.appendChild(document.createTextNode(run.value));
             }
@@ -2099,13 +2255,13 @@
       }
 
       const time = document.createElement('div');
-      time.textContent = msg.time;
+      time.textContent = msg.time || '';
       time.style.cssText = `font-size:10.5px;font-weight:600;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;`;
       header.appendChild(time);
 
       card.appendChild(header);
 
-      if (!activePos) {
+      if (hasMap && !activePos) {
         const gapNote = document.createElement('div');
         gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
@@ -2114,13 +2270,13 @@
       if (msg.unsupportedType) {
         // Un drago è "non riconosciuto" solo nel senso che lot non espone
         // mai il giocatore reale dietro la mutaforma (per design, non un
-        // limite del parser) — nota diversa da quella generica di sistema/
-        // dado/sussurro, che invece è un vero parlante non identificato.
+        // limite del parser) — nota diversa da quella generica di sistema,
+        // che invece è un vero parlante non identificato.
         const isDrago = fallbackSpeakerLabel(msg.razzaIcon) === 'Drago';
         const typeNote = document.createElement('div');
         typeNote.textContent = isDrago
           ? 'Drago: lot non espone il giocatore reale dietro la mutaforma — nessun PG collegabile.'
-          : 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
+          : 'Messaggio con parlante non riconosciuto (es. sistema) — visualizzazione standard.';
         typeNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
         card.appendChild(typeNote);
       }
@@ -2130,14 +2286,43 @@
       // messaggi normali) ma applicarlo lì renderebbe TUTTO evidenziato,
       // l'opposto del "richiamo leggero, solo sui messaggi che spiccano già
       // su lot" che era la richiesta originale.
-      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
+      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip' || msg.msgType === 'skill';
+      const isWhisper = msg.msgType === 'sussurro';
+      const isDice = msg.msgType === 'dado';
+      const isSkill = msg.msgType === 'skill';
+      if (isWhisper && msg.sussurroLabel) {
+        const whisperLabel = document.createElement('div');
+        whisperLabel.textContent = msg.sussurroLabel;
+        whisperLabel.style.cssText = `font-size:10.5px;font-style:italic;color:${COLOR_WHISPER};`;
+        card.appendChild(whisperLabel);
+      }
+      // Skill: pubblico come il dado, ma senza un'icona propria fornita —
+      // un'etichetta "Skill" col colore reale con cui lot mostra il
+      // messaggio (varia per skill, non fisso come il dado) basta a
+      // distinguerlo dalla narrazione normale, blocco unico invece di
+      // spezzarlo in azione/parlato (è sempre descrizione, mai dialogo).
+      if (isSkill) {
+        const skillLabel = document.createElement('div');
+        skillLabel.textContent = 'Skill';
+        skillLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${msg.msgColor || COLOR_GOLD};`;
+        card.appendChild(skillLabel);
+      }
+      // Dado: icona d20 reale di lot + risultato in evidenza invece del
+      // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
+      // pubblico (a differenza del sussurro, niente da nascondere), un
+      // bordo dorato pieno basta a farlo notare nella timeline.
       card.appendChild(buildSpeechBubbles(
         msg.testo,
         msg.msgType === 'azione',
-        isStyledType ? msg.msgColor : null,
-        isStyledType ? msg.msgBold : false,
-        msg.msgType === 'equip',
-        msg.equipRuns
+        isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isStyledType ? msg.msgColor : null)),
+        isDice ? true : (isStyledType ? msg.msgBold : false),
+        msg.msgType === 'equip' || isWhisper || isDice || isSkill,
+        isDice ? [
+          { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
+          { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
+        ] : msg.equipRuns,
+        isWhisper,
+        isDice || isSkill || msg.msgType === 'equip'
       ));
 
       return card;
@@ -2168,15 +2353,22 @@
       const nm = document.createElement('div');
       nm.textContent = pg.nome;
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
+      const isWhisperPreview = msg.msgType === 'sussurro';
+      const isDicePreview = msg.msgType === 'dado';
+      const isSkillPreview = msg.msgType === 'skill';
       const pv = document.createElement('div');
-      pv.textContent = splitSegments(msg.testo).map((p) => p.content).join(' ');
-      pv.style.cssText = `font-size:10.5px;color:${COLOR_TEXT_DIM};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
+      pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
+        : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
+        : isSkillPreview ? `Skill: ${preview}`
+        : preview;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
 
       const time = document.createElement('div');
-      time.textContent = msg.time;
+      time.textContent = msg.time || '';
       time.style.cssText = `font-size:10px;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;flex:0 0 auto;`;
       row.appendChild(time);
 
