@@ -2447,18 +2447,22 @@
         // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
         // pubblico (a differenza del sussurro, niente da nascondere), un
         // bordo dorato pieno basta a farlo notare nella timeline.
+        // Fato: stessa sintassi del tipo '+' (narrazione fuori, parlato
+        // dentro «»/<>/ecc.) — niente più blocco unico, si spezza in
+        // fumetti azione/parlato come un'azione normale, solo col bordo
+        // magenta dedicato invece del colore reale del messaggio.
         card.appendChild(buildSpeechBubbles(
           msg.testo,
-          msg.msgType === 'azione',
+          msg.msgType === 'azione' || isFato,
           isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
           isDice ? true : (isStyledType ? msg.msgBold : false),
-          msg.msgType === 'equip' || isWhisper || isDice || isSkill || isFato,
+          msg.msgType === 'equip' || isWhisper || isDice || isSkill,
           isDice ? [
             { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
             { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
           ] : msg.equipRuns,
           isWhisper,
-          isDice || isSkill || msg.msgType === 'equip' || isFato
+          isDice || isSkill || msg.msgType === 'equip'
         ));
       }
 
