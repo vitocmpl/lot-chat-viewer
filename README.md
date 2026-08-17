@@ -80,6 +80,7 @@ Replay di una chat salvata:
 - Luoghi senza mappa disponibile (es. Covo): scena solo testo/fumetti con la nostra grafica, senza riquadro mappa/griglia/token
 - Sussurri (live e replay): parlante riconosciuto, blocco dedicato con bordo tratteggiato ed etichetta ("sussurra a ...") a marcarli come effimeri/privati rispetto ai messaggi pubblici
 - Tiri di dadi (live e replay): parlante riconosciuto, blocco dedicato con icona d20 e risultato in evidenza ("Tiro di dadi: X su Y") invece del testo grezzo
+- Uso di skill (live e replay): parlante riconosciuto, blocco dedicato con etichetta "Skill" ed evidenziato col colore reale con cui lot mostra quel messaggio
 
 Non ancora presente:
 

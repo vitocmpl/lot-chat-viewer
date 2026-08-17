@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.74
+// @version      0.0.75
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -337,6 +337,14 @@
   // pattern testuale invece di duplicare la detection nei due parser.
   const DICE_ROLL_RE = /ha tirato i dadi col risultato di\s*(\d+)\s*su\s*(\d+)/i;
 
+  // Uso di skill: lot antepone sempre questo prefisso letterale al testo di
+  // narrazione, sia in live che in replay — a differenza del dado, il nick
+  // del PG compare DENTRO la frase (es. "Il corpo del Vampiro Alderick
+  // diviene..."), spesso ben oltre i 40 caratteri usati altrove come soglia
+  // euristica per "è un prefisso, toglilo": va rilevato PRIMA di quello
+  // strip generico, altrimenti lo spezza a metà frase.
+  const SKILL_PREFIX_RE = /^\[SKILL\]\s*/i;
+
   // Spezza una stringa reale nelle sue "pagine" alternate: dentro «» <> ()
   // {} [] e fuori, nell'ordine in cui compaiono nel testo. I tag [...] di
   // metadato (coordinate/tag modali) sono già stati rimossi dal parser
@@ -582,6 +590,15 @@
       testo = testo.slice(speaker.length).replace(/^\s*-?\s+/, '');
     }
 
+    // Skill: qui il testo inizia già con "[SKILL]" (il nick, se presente,
+    // è dentro la narrazione, non un prefisso — testo.startsWith(speaker)
+    // sopra non scatta comunque su questo caso), quindi basta riconoscere
+    // il prefisso e toglierlo.
+    if (SKILL_PREFIX_RE.test(testo)) {
+      msgType = 'skill';
+      testo = testo.replace(SKILL_PREFIX_RE, '');
+    }
+
     // Tiro di dadi: nessuna classe/tabella dedicata qui (a differenza del
     // sussurro), solo lo stesso testo generato da lot già visto in live —
     // il parlante si legge già dal solito link avatar.asp, come un
@@ -799,15 +816,26 @@
     // verso i certificati, niente altro chrome.
     const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
-    // Per azione/skill/dado il nick (con eventuale "carica" davanti) resta
+    // Skill (msg-skill): il nick del PG compare DENTRO la narrazione (es.
+    // "Il corpo del Vampiro Alderick diviene..."), non come prefisso — lo
+    // strip generico sotto (pensato per azione/dado, dove il nick precede
+    // davvero il testo) lo troverebbe comunque entro i 40 caratteri e
+    // spezzerebbe la frase a metà. Va riconosciuto ORA, prima dello strip,
+    // per poterlo saltare.
+    const isSkillMsg = SKILL_PREFIX_RE.test(testo);
+    // Per azione/dado il nick (con eventuale "carica" davanti) resta
     // incollato dentro il testo — .msg-nick esiste solo per i messaggi
     // normali (già rimosso sopra). Se conosciamo il parlante dal link
     // dell'icona razza, si toglie tutto fino alla fine del suo nome.
-    if (speaker) {
+    if (speaker && !isSkillMsg) {
       const idx = testo.indexOf(speaker);
       if (idx !== -1 && idx < 40) {
         testo = testo.slice(idx + speaker.length).replace(/^\s*-?\s+/, '');
       }
+    }
+    if (isSkillMsg) {
+      msgType = 'skill';
+      testo = testo.replace(SKILL_PREFIX_RE, '');
     }
 
     // Tiro di dadi (msg-dado in live, nessuna classe dedicata in replay):
@@ -2223,13 +2251,13 @@
       if (msg.unsupportedType) {
         // Un drago è "non riconosciuto" solo nel senso che lot non espone
         // mai il giocatore reale dietro la mutaforma (per design, non un
-        // limite del parser) — nota diversa da quella generica di sistema/
-        // dado/sussurro, che invece è un vero parlante non identificato.
+        // limite del parser) — nota diversa da quella generica di sistema,
+        // che invece è un vero parlante non identificato.
         const isDrago = fallbackSpeakerLabel(msg.razzaIcon) === 'Drago';
         const typeNote = document.createElement('div');
         typeNote.textContent = isDrago
           ? 'Drago: lot non espone il giocatore reale dietro la mutaforma — nessun PG collegabile.'
-          : 'Messaggio con parlante non riconosciuto (es. sistema/dado/sussurro) — visualizzazione standard.';
+          : 'Messaggio con parlante non riconosciuto (es. sistema) — visualizzazione standard.';
         typeNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
         card.appendChild(typeNote);
       }
@@ -2239,14 +2267,26 @@
       // messaggi normali) ma applicarlo lì renderebbe TUTTO evidenziato,
       // l'opposto del "richiamo leggero, solo sui messaggi che spiccano già
       // su lot" che era la richiesta originale.
-      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip';
+      const isStyledType = msg.msgType === 'azione' || msg.msgType === 'equip' || msg.msgType === 'skill';
       const isWhisper = msg.msgType === 'sussurro';
       const isDice = msg.msgType === 'dado';
+      const isSkill = msg.msgType === 'skill';
       if (isWhisper && msg.sussurroLabel) {
         const whisperLabel = document.createElement('div');
         whisperLabel.textContent = msg.sussurroLabel;
         whisperLabel.style.cssText = `font-size:10.5px;font-style:italic;color:${COLOR_WHISPER};`;
         card.appendChild(whisperLabel);
+      }
+      // Skill: pubblico come il dado, ma senza un'icona propria fornita —
+      // un'etichetta "Skill" col colore reale con cui lot mostra il
+      // messaggio (varia per skill, non fisso come il dado) basta a
+      // distinguerlo dalla narrazione normale, blocco unico invece di
+      // spezzarlo in azione/parlato (è sempre descrizione, mai dialogo).
+      if (isSkill) {
+        const skillLabel = document.createElement('div');
+        skillLabel.textContent = 'Skill';
+        skillLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${msg.msgColor || COLOR_GOLD};`;
+        card.appendChild(skillLabel);
       }
       // Dado: icona d20 reale di lot + risultato in evidenza invece del
       // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
@@ -2257,7 +2297,7 @@
         msg.msgType === 'azione',
         isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isStyledType ? msg.msgColor : null)),
         isDice ? true : (isStyledType ? msg.msgBold : false),
-        msg.msgType === 'equip' || isWhisper || isDice,
+        msg.msgType === 'equip' || isWhisper || isDice || isSkill,
         isDice ? [
           { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
           { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
@@ -2295,12 +2335,14 @@
       nm.style.cssText = `font-size:11px;font-weight:700;color:${COLOR_TEXT};`;
       const isWhisperPreview = msg.msgType === 'sussurro';
       const isDicePreview = msg.msgType === 'dado';
+      const isSkillPreview = msg.msgType === 'skill';
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
       pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
         : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
+        : isSkillPreview ? `Skill: ${preview}`
         : preview;
-      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
