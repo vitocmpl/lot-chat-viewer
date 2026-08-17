@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.70
+// @version      0.0.71
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1673,6 +1673,11 @@
         img.alt = '';
         img.draggable = false;
         img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+        // Alcuni layer (accessori tipo "manette") su lot puntano a
+        // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
+        // si vede nulla), ma senza questa gestione qui compare l'icona di
+        // immagine non trovata del browser sopra il modellino.
+        img.addEventListener('error', () => img.remove());
         sprite.appendChild(img);
       });
       const shadow = document.createElement('div');
