@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.72
+// @version      0.0.73
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2169,7 +2169,7 @@
 
       card.appendChild(header);
 
-      if (!activePos) {
+      if (hasMap && !activePos) {
         const gapNote = document.createElement('div');
         gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
