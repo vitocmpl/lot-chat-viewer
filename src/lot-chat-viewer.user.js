@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.78
+// @version      0.0.87
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
-// @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
+// @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
 // @run-at       document-idle
 // @grant        none
@@ -312,6 +312,27 @@
       && /\d{2}:\d{2}/.test(node.textContent);
   }
 
+  // Fato e Immagine (chat_salvate): a differenza di ogni altro tipo di
+  // messaggio, qui NON hanno un proprio <font color="#606060"> di
+  // timestamp che li isoli come blocco — compaiono incollati DENTRO il
+  // flusso piatto subito dopo il messaggio del giocatore precedente,
+  // prima del prossimo timestamp reale (visto in un esempio reale dove
+  // Fato segue la battuta di un PG senza alcun orario proprio). Vanno
+  // quindi riconosciuti e staccati come blocchi a sé PRIMA di finire
+  // impastati nel testo del messaggio del PG a cui sono solo
+  // "attaccati" nel markup — non hanno un vero orario, a differenza di
+  // tutto il resto.
+  function findFatoTd(node) {
+    if (!node || node.nodeType !== 1 || !node.querySelectorAll) return null;
+    const tds = node.tagName === 'TD' ? [node] : Array.from(node.querySelectorAll('td[bgcolor]'));
+    return tds.find((td) => (td.getAttribute('bgcolor') || '').toUpperCase() === '#502020') || null;
+  }
+  function findImmagineImg(node) {
+    if (!node || node.nodeType !== 1) return null;
+    if (node.tagName === 'CENTER') return node.querySelector('img');
+    return null;
+  }
+
   // Ordine di visualizzazione dei tag modali, identico al client reale.
   const TAG_KIND_ORDER = { F: 0, M: 1, L: 2, S: 3, A: 4, P: 5 };
 
@@ -329,6 +350,14 @@
   // sistema del MED_ICON_URL sopra, un'icona presa da lot invece di
   // inventarne una nostra.
   const DICE_ICON_URL = 'https://www.extremelot.eu/proc/magioninew/dadi/d20.png';
+
+  // Fato: non ha un vero PG dietro (è il mondo di gioco stesso a parlare,
+  // niente stemma/censo reale nel markup — vedi msg-fato-box più sotto).
+  // Usiamo comunque un'icona reale di lot al posto dello stemma, per dargli
+  // un'identità visiva riconoscibile invece del solito placeholder
+  // "iniziale del nome": va nel campo censoUrl del messaggio, così
+  // fillAvatar() la mostra esattamente come farebbe con uno stemma vero.
+  const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/THEring40x30.gif';
 
   // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
   // (msg-dado, ma il parlante si legge già dal solito link icona razza,
@@ -652,22 +681,58 @@
     const messages = [];
     let currentTimeFont = null;
     let currentRest = [];
-    Array.from(chatEl.childNodes).forEach((node) => {
-      if (isGreyTimestampFont(node)) {
-        if (currentTimeFont) {
-          const parsed = parseBlock(currentTimeFont, currentRest, doc);
-          if (parsed) messages.push(parsed);
-        }
-        currentTimeFont = node;
-        currentRest = [];
-      } else if (currentTimeFont) {
-        currentRest.push(node);
-      }
-    });
-    if (currentTimeFont) {
+    // Chiude il blocco eventualmente aperto (parlante con timestamp) prima
+    // di passare a qualcos'altro — condiviso tra il normale avvicendarsi
+    // dei timestamp e l'interruzione forzata da un nodo Fato/Immagine.
+    function flushCurrent() {
+      if (!currentTimeFont) return;
       const parsed = parseBlock(currentTimeFont, currentRest, doc);
       if (parsed) messages.push(parsed);
+      currentTimeFont = null;
+      currentRest = [];
     }
+    Array.from(chatEl.childNodes).forEach((node) => {
+      if (isGreyTimestampFont(node)) {
+        flushCurrent();
+        currentTimeFont = node;
+        currentRest = [];
+        return;
+      }
+      const fatoTd = findFatoTd(node);
+      if (fatoTd) {
+        flushCurrent();
+        const testo = decodeEntitiesOnce(fatoTd.textContent).replace(/\s+/g, ' ').trim();
+        if (testo) {
+          messages.push({
+            time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+            coordRaw: null, posLabel: null, tags: [], med: null, testo,
+            equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
+            msgColor: null, msgBold: false,
+          });
+        }
+        return;
+      }
+      const immagineImg = findImmagineImg(node);
+      if (immagineImg) {
+        flushCurrent();
+        const imageUrl = immagineImg.getAttribute('src');
+        if (imageUrl) {
+          messages.push({
+            // censoUrl = imageUrl: stesso trucco usato per l'anello del
+            // Fato, così fillAvatar() mostra da sé una miniatura
+            // dell'immagine come icona in timeline (compatta ed
+            // espansa), senza duplicare quella logica qui.
+            time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: imageUrl,
+            coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
+            equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
+            msgColor: null, msgBold: false,
+          });
+        }
+        return;
+      }
+      if (currentTimeFont) currentRest.push(node);
+    });
+    flushCurrent();
 
     return { locationName, dateLabel, messages };
   }
@@ -751,6 +816,45 @@
       };
     }
 
+    // Fato/destino (chat live): struttura dedicata (.msg-fato-box), testo
+    // nudo senza nick/orario/icona razza/stemma — non è un PG a parlare ma
+    // il mondo di gioco stesso (il "master dei giochi", come lo definisce
+    // Vito), quindi niente "parlante non riconosciuto" (unsupportedType
+    // resta false: è così di design, non un buco del parser). speaker
+    // fisso 'Fato', censoUrl fisso su FATO_ICON_URL per dargli comunque
+    // un'icona in timeline. Nessun esempio di replay (chat_salvate) sotto
+    // mano: solo il lato live è gestito qui.
+    const fatoBox = wrap.querySelector('.msg-fato-box');
+    if (fatoBox) {
+      const testo = decodeEntitiesOnce(fatoBox.textContent).replace(/\s+/g, ' ').trim();
+      if (!testo) return null;
+      return {
+        time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo,
+        equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
+        msgColor: null, msgBold: false,
+      };
+    }
+
+    // Immagine (chat live): struttura dedicata (.msg-immagine), stesso
+    // markup nudo (<center><img></center>) visto anche nel flusso piatto
+    // di chat_salvate — nessun PG dietro, come per il Fato: un'illustrazione
+    // che lot mostra al centro della chat, non una battuta.
+    if (el.classList.contains('msg-immagine')) {
+      const img = wrap.querySelector('img');
+      const imageUrl = img ? img.getAttribute('src') : null;
+      if (!imageUrl) return null;
+      // censoUrl = imageUrl: stesso trucco usato per l'anello del Fato,
+      // così fillAvatar() mostra da sé una miniatura dell'immagine come
+      // icona in timeline (compatta ed espansa).
+      return {
+        time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: imageUrl,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
+        equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
+        msgColor: null, msgBold: false,
+      };
+    }
+
     // "Certifica oggetti in gioco": stringa automatica generata dal comando
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
     // server per questi messaggi, quindi niente speaker via link ARMInew26)
@@ -827,6 +931,35 @@
     // verso i certificati, niente altro chrome.
     const equipRuns = msgType === 'equip' ? stripSpeakerPrefixFromRuns(extractRichRuns(wrap), speaker) : null;
     let testo = wrap.textContent.replace(/\s+/g, ' ').trim();
+
+    // Desiderio al Pozzo dei Desideri: riga automatica generata da quella
+    // locazione quando un PG esprime un desiderio ("Al Pozzo dei Desideri
+    // NICK : 'desiderio'"). Non è il PG a "parlare" qui (non ha scelto lui
+    // il fumetto), è il Pozzo a riportare il desiderio — stesso principio
+    // del Fato: pseudo-parlante fisso, niente coordinata/posizione sulla
+    // mappa per design, il nome del PG resta dentro al testo invece che
+    // nell'header. In live questa riga non ha alcuna icona/link di
+    // parlante nel markup (a differenza di ogni altro '+'): senza questo
+    // riconoscimento dedicato ricadrebbe su "Sistema" col nome del PG
+    // scambiato per parlante. In replay lo stesso desiderio ha invece un
+    // link avatar reale (nessun caso speciale necessario lì, resta un
+    // messaggio "azione" normale attribuito al PG che l'ha espresso).
+    // Specifico di questa locazione: se ricompare altrove con un prefisso
+    // diverso, va esteso.
+    if (!speaker && msgType === 'azione') {
+      const wishMatch = testo.match(/^Al Pozzo dei Desideri\s+(.+?)\s*:\s*'(.*)'\s*$/);
+      if (wishMatch) {
+        const wishPg = wishMatch[1].trim();
+        const wishText = wishMatch[2].trim();
+        return {
+          time, speaker: 'Pozzo dei Desideri', razzaIcon: null, razzaLink: null, censoUrl: null,
+          coordRaw: null, posLabel: null, tags: [], med: null, testo: `${wishPg}: '${wishText}'`,
+          equipRuns: null, unsupportedType: false, msgType: 'desiderio', imageUrl: null,
+          msgColor: null, msgBold: false,
+        };
+      }
+    }
+
     // Skill (msg-skill): il nick del PG compare DENTRO la narrazione (es.
     // "Il corpo del Vampiro Alderick diviene..."), non come prefisso — lo
     // strip generico sotto (pensato per azione/dado, dove il nick precede
@@ -887,9 +1020,19 @@
     '—', chatParsed.messages.length, 'messaggi');
   // I messaggi con parlante non riconosciuto (unsupportedType, vedi
   // parseBlock) restano nella timeline con un'etichetta placeholder, ma
-  // non sono un vero PG: niente fetch scheda/aspetto per loro.
+  // non sono un vero PG: niente fetch scheda/aspetto per loro. Stesso
+  // discorso per Fato/Immagine/desiderio al Pozzo: "speaker" lì è un nome
+  // fisso condiviso da messaggi diversi (ogni Fato/Immagine/desiderio è un
+  // contenuto a sé, non un vero PG), quindi vanno esclusi dal roster —
+  // altrimenti buildPGRecord ne costruirebbe UN SOLO record condiviso
+  // (censoUrl del primo trovato in buildChatDerivedRoster), che tutti i
+  // messaggi di quel tipo si ritroverebbero addosso al posto della propria
+  // immagine reale, oltre a fare un fetch inutile di scheda/aspetto per un
+  // nome PG che non esiste.
   const roster = Array.from(new Set(
-    chatParsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+    chatParsed.messages
+      .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine' && m.msgType !== 'desiderio')
+      .map((m) => m.speaker)
   ));
   console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
   console.log('[lot-chat-viewer] primi 8 messaggi:', JSON.stringify(chatParsed.messages.slice(0, 8), null, 2));
@@ -1164,6 +1307,11 @@
     // colpo d'occhio come "diversi" — effimeri, visibili solo a mittente e
     // destinatario, non un vero messaggio pubblico in chat.
     const COLOR_WHISPER = '#8a6fa8';
+    // Fato: lo stesso bgcolor reale (#502020, un rosso mattone scuro) con
+    // cui lot colora la riga del messaggio Fato nella chat originale, non
+    // un accento inventato — coerenza diretta con l'originale invece che
+    // col tag modale F (colore diverso, usato altrove per il badge).
+    const COLOR_FATO = '#502020';
 
     // In-flow (non fixed): va esattamente al posto di .lot-chat, non
     // sopra a tutta la pagina — un overlay fixed a schermo intero
@@ -2261,7 +2409,11 @@
 
       card.appendChild(header);
 
-      if (hasMap && !activePos) {
+      // Il Fato, l'Immagine e il desiderio al Pozzo non sono mai "in attesa
+      // di una coordinata" come un PG appena arrivato: per design non ne
+      // avranno mai una (non sono token sulla mappa), quindi niente nota
+      // "non ancora visibile".
+      if (hasMap && !activePos && msg.msgType !== 'fato' && msg.msgType !== 'immagine' && msg.msgType !== 'desiderio') {
         const gapNote = document.createElement('div');
         gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
@@ -2290,6 +2442,9 @@
       const isWhisper = msg.msgType === 'sussurro';
       const isDice = msg.msgType === 'dado';
       const isSkill = msg.msgType === 'skill';
+      const isFato = msg.msgType === 'fato';
+      const isImmagine = msg.msgType === 'immagine';
+      const isDesiderio = msg.msgType === 'desiderio';
       if (isWhisper && msg.sussurroLabel) {
         const whisperLabel = document.createElement('div');
         whisperLabel.textContent = msg.sussurroLabel;
@@ -2307,23 +2462,59 @@
         skillLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${msg.msgColor || COLOR_GOLD};`;
         card.appendChild(skillLabel);
       }
-      // Dado: icona d20 reale di lot + risultato in evidenza invece del
-      // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
-      // pubblico (a differenza del sussurro, niente da nascondere), un
-      // bordo dorato pieno basta a farlo notare nella timeline.
-      card.appendChild(buildSpeechBubbles(
-        msg.testo,
-        msg.msgType === 'azione',
-        isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isStyledType ? msg.msgColor : null)),
-        isDice ? true : (isStyledType ? msg.msgBold : false),
-        msg.msgType === 'equip' || isWhisper || isDice || isSkill,
-        isDice ? [
-          { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
-          { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
-        ] : msg.equipRuns,
-        isWhisper,
-        isDice || isSkill || msg.msgType === 'equip'
-      ));
+      // Fato: nessuna etichetta dedicata qui — il nome "Fato" è già nel
+      // header della card (pg.nome), ripeterlo sotto sarebbe ridondante.
+      // Immagine: niente fumetto di testo (msg.testo è vuoto per questo
+      // tipo), lot mostra l'illustrazione stessa al centro della chat — qui
+      // una thumbnail più piccola, zoomabile nello stesso lightbox già
+      // usato per il ritratto della scheda PG (openAvatarLightbox), invece
+      // di forzarla intera nel box parlato/azione o duplicare l'overlay.
+      if (isImmagine && msg.imageUrl) {
+        // Box a dimensione fissa + object-fit:contain sull'<img> (stesso
+        // schema già usato per gli avatar censo/stemma): con solo
+        // max-width/max-height sull'<img> stesso, un qualunque CSS globale
+        // di lot che imponga una width alle immagini (pagine vecchio stile,
+        // spesso a tabelle) la stiracchierebbe fuori rapporto — qui invece
+        // width/height 100% del box fisso + contain garantisce le
+        // proporzioni originali indipendentemente dallo stile della pagina.
+        const thumbBox = document.createElement('div');
+        thumbBox.style.cssText = `width:220px;max-width:100%;height:160px;border-radius:8px;border:1.5px solid ${COLOR_LINE};overflow:hidden;cursor:zoom-in;background:${COLOR_SURFACE};`;
+        const thumb = document.createElement('img');
+        thumb.src = msg.imageUrl;
+        thumb.alt = '';
+        thumb.draggable = false;
+        thumb.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+        thumbBox.appendChild(thumb);
+        thumbBox.addEventListener('click', () => openAvatarLightbox(msg.imageUrl, 'Immagine'));
+        card.appendChild(thumbBox);
+      } else {
+        // Dado: icona d20 reale di lot + risultato in evidenza invece del
+        // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
+        // pubblico (a differenza del sussurro, niente da nascondere), un
+        // bordo dorato pieno basta a farlo notare nella timeline.
+        // Fato: stessa sintassi del tipo '+' (narrazione fuori, parlato
+        // dentro «»/<>/ecc.) — niente più blocco unico, si spezza in
+        // fumetti azione/parlato come un'azione normale, con lo stesso
+        // bordo (spesso) del bgcolor reale con cui lot colora la riga del
+        // Fato nella chat originale (COLOR_FATO = #502020).
+        // Desiderio al Pozzo: blocco unico stondato (come un parlato
+        // normale, non squadrato/corsivo come le altre descrizioni di
+        // sistema) — il nome del PG e il desiderio sono già dentro
+        // msg.testo ("NICK: 'desiderio'"), niente bordo/peso dedicati.
+        card.appendChild(buildSpeechBubbles(
+          msg.testo,
+          msg.msgType === 'azione' || isFato,
+          isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
+          isDice || isFato ? true : (isStyledType ? msg.msgBold : false),
+          msg.msgType === 'equip' || isWhisper || isDice || isSkill || isDesiderio,
+          isDice ? [
+            { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
+            { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
+          ] : msg.equipRuns,
+          isWhisper,
+          isDice || isSkill || msg.msgType === 'equip'
+        ));
+      }
 
       return card;
     }
@@ -2356,13 +2547,20 @@
       const isWhisperPreview = msg.msgType === 'sussurro';
       const isDicePreview = msg.msgType === 'dado';
       const isSkillPreview = msg.msgType === 'skill';
+      const isImmaginePreview = msg.msgType === 'immagine';
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
+      // Fato: niente prefisso "Fato: " né colore/peso dedicati — il nome
+      // "Fato" è già la riga sopra (nm, pg.nome), qui basta il formato
+      // standard come per un PG qualunque. COLOR_FATO (#502020, un rosso
+      // mattone scuro) è pensato per un bordo su sfondo chiaro, non per il
+      // testo su questo sfondo scuro: illeggibile se usato qui.
       pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
         : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
         : isSkillPreview ? `Skill: ${preview}`
+        : isImmaginePreview ? 'Immagine'
         : preview;
-      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : COLOR_TEXT_DIM};font-style:${isWhisperPreview || isImmaginePreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);
@@ -2391,7 +2589,7 @@
         // messaggio non riconosciuto, o un fetch scheda/aspetto fallito):
         // meglio una card degradata che farla sparire dalla timeline.
         const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
-          nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+          nome: msg.speaker, razza: null, sesso: null, censoUrl: msg.censoUrl || null, ritrattoUrl: null, aspetto: null,
           iconUrl: msg.razzaIcon || null,
         };
         sidebarList.appendChild(
@@ -2494,8 +2692,12 @@
       const parsed = parseChatTaverna(liveContainer);
       if (!parsed.messages.length) return;
       const chatDerivedRoster = buildChatDerivedRoster(parsed.messages);
+      // Stessa esclusione Fato/Immagine/desiderio del roster iniziale più
+      // sopra — vedi commento lì per il perché.
       const liveRoster = Array.from(new Set(
-        parsed.messages.filter((m) => !m.unsupportedType).map((m) => m.speaker)
+        parsed.messages
+          .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine' && m.msgType !== 'desiderio')
+          .map((m) => m.speaker)
       ));
       Promise.all([
         Promise.all(liveRoster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
