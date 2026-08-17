@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.86
+// @version      0.0.87
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -934,17 +934,29 @@
 
     // Desiderio al Pozzo dei Desideri: riga automatica generata da quella
     // locazione quando un PG esprime un desiderio ("Al Pozzo dei Desideri
-    // NICK : 'desiderio'"), tipo '+' come un'azione normale ma — a
-    // differenza di ogni altro '+' — senza alcuna icona/link di parlante
-    // nel markup live: ricadrebbe su "Sistema" senza questo riconoscimento
-    // dedicato. In replay lo stesso desiderio ha invece un link avatar
-    // reale (nessun caso speciale necessario lì). Specifico di questa
-    // locazione: se ricompare altrove con un prefisso diverso, va esteso.
+    // NICK : 'desiderio'"). Non è il PG a "parlare" qui (non ha scelto lui
+    // il fumetto), è il Pozzo a riportare il desiderio — stesso principio
+    // del Fato: pseudo-parlante fisso, niente coordinata/posizione sulla
+    // mappa per design, il nome del PG resta dentro al testo invece che
+    // nell'header. In live questa riga non ha alcuna icona/link di
+    // parlante nel markup (a differenza di ogni altro '+'): senza questo
+    // riconoscimento dedicato ricadrebbe su "Sistema" col nome del PG
+    // scambiato per parlante. In replay lo stesso desiderio ha invece un
+    // link avatar reale (nessun caso speciale necessario lì, resta un
+    // messaggio "azione" normale attribuito al PG che l'ha espresso).
+    // Specifico di questa locazione: se ricompare altrove con un prefisso
+    // diverso, va esteso.
     if (!speaker && msgType === 'azione') {
       const wishMatch = testo.match(/^Al Pozzo dei Desideri\s+(.+?)\s*:\s*'(.*)'\s*$/);
       if (wishMatch) {
-        speaker = wishMatch[1].trim();
-        testo = `'${wishMatch[2].trim()}'`;
+        const wishPg = wishMatch[1].trim();
+        const wishText = wishMatch[2].trim();
+        return {
+          time, speaker: 'Pozzo dei Desideri', razzaIcon: null, razzaLink: null, censoUrl: null,
+          coordRaw: null, posLabel: null, tags: [], med: null, testo: `${wishPg}: '${wishText}'`,
+          equipRuns: null, unsupportedType: false, msgType: 'desiderio', imageUrl: null,
+          msgColor: null, msgBold: false,
+        };
       }
     }
 
@@ -1009,16 +1021,17 @@
   // I messaggi con parlante non riconosciuto (unsupportedType, vedi
   // parseBlock) restano nella timeline con un'etichetta placeholder, ma
   // non sono un vero PG: niente fetch scheda/aspetto per loro. Stesso
-  // discorso per Fato/Immagine: "speaker" lì è un nome fisso condiviso da
-  // messaggi diversi (ogni Fato/Immagine è un contenuto a sé, non un vero
-  // PG), quindi vanno esclusi dal roster — altrimenti buildPGRecord ne
-  // costruirebbe UN SOLO record condiviso (censoUrl del primo trovato in
-  // buildChatDerivedRoster), che tutti i messaggi di quel tipo si
-  // ritroverebbero addosso al posto della propria immagine reale, oltre a
-  // fare un fetch inutile di scheda/aspetto per un nome PG che non esiste.
+  // discorso per Fato/Immagine/desiderio al Pozzo: "speaker" lì è un nome
+  // fisso condiviso da messaggi diversi (ogni Fato/Immagine/desiderio è un
+  // contenuto a sé, non un vero PG), quindi vanno esclusi dal roster —
+  // altrimenti buildPGRecord ne costruirebbe UN SOLO record condiviso
+  // (censoUrl del primo trovato in buildChatDerivedRoster), che tutti i
+  // messaggi di quel tipo si ritroverebbero addosso al posto della propria
+  // immagine reale, oltre a fare un fetch inutile di scheda/aspetto per un
+  // nome PG che non esiste.
   const roster = Array.from(new Set(
     chatParsed.messages
-      .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine')
+      .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine' && m.msgType !== 'desiderio')
       .map((m) => m.speaker)
   ));
   console.log('[lot-chat-viewer] roster:', JSON.stringify(roster, null, 2));
@@ -2396,10 +2409,11 @@
 
       card.appendChild(header);
 
-      // Il Fato e l'Immagine non sono mai "in attesa di una coordinata"
-      // come un PG appena arrivato: per design non ne avranno mai una (non
-      // sono token sulla mappa), quindi niente nota "non ancora visibile".
-      if (hasMap && !activePos && msg.msgType !== 'fato' && msg.msgType !== 'immagine') {
+      // Il Fato, l'Immagine e il desiderio al Pozzo non sono mai "in attesa
+      // di una coordinata" come un PG appena arrivato: per design non ne
+      // avranno mai una (non sono token sulla mappa), quindi niente nota
+      // "non ancora visibile".
+      if (hasMap && !activePos && msg.msgType !== 'fato' && msg.msgType !== 'immagine' && msg.msgType !== 'desiderio') {
         const gapNote = document.createElement('div');
         gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
@@ -2430,6 +2444,7 @@
       const isSkill = msg.msgType === 'skill';
       const isFato = msg.msgType === 'fato';
       const isImmagine = msg.msgType === 'immagine';
+      const isDesiderio = msg.msgType === 'desiderio';
       if (isWhisper && msg.sussurroLabel) {
         const whisperLabel = document.createElement('div');
         whisperLabel.textContent = msg.sussurroLabel;
@@ -2482,12 +2497,16 @@
         // fumetti azione/parlato come un'azione normale, con lo stesso
         // bordo (spesso) del bgcolor reale con cui lot colora la riga del
         // Fato nella chat originale (COLOR_FATO = #502020).
+        // Desiderio al Pozzo: blocco unico stondato (come un parlato
+        // normale, non squadrato/corsivo come le altre descrizioni di
+        // sistema) — il nome del PG e il desiderio sono già dentro
+        // msg.testo ("NICK: 'desiderio'"), niente bordo/peso dedicati.
         card.appendChild(buildSpeechBubbles(
           msg.testo,
           msg.msgType === 'azione' || isFato,
           isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
           isDice || isFato ? true : (isStyledType ? msg.msgBold : false),
-          msg.msgType === 'equip' || isWhisper || isDice || isSkill,
+          msg.msgType === 'equip' || isWhisper || isDice || isSkill || isDesiderio,
           isDice ? [
             { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
             { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
@@ -2673,11 +2692,11 @@
       const parsed = parseChatTaverna(liveContainer);
       if (!parsed.messages.length) return;
       const chatDerivedRoster = buildChatDerivedRoster(parsed.messages);
-      // Stessa esclusione Fato/Immagine del roster iniziale più sopra —
-      // vedi commento lì per il perché.
+      // Stessa esclusione Fato/Immagine/desiderio del roster iniziale più
+      // sopra — vedi commento lì per il perché.
       const liveRoster = Array.from(new Set(
         parsed.messages
-          .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine')
+          .filter((m) => !m.unsupportedType && m.msgType !== 'fato' && m.msgType !== 'immagine' && m.msgType !== 'desiderio')
           .map((m) => m.speaker)
       ));
       Promise.all([
