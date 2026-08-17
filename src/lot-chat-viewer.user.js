@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.69
+// @version      0.0.70
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -450,7 +450,7 @@
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
-    const speaker = speakerFromBlock(wrap);
+    let speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
@@ -468,9 +468,22 @@
     // 'N' e mai per '+'/'S'/'6'. Un drago (nessuna icona speaker, nessuno
     // stemma) ricade quindi correttamente su 'azione', non 'normale'. La
     // dichiarazione oggetti ("Certifica Possesso") resta riconoscibile
-    // dagli stessi link con target="new" già usati in parseTavernaMsgEl.
-    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    // dagli stessi link con target="new" già usati in parseTavernaMsgEl —
+    // presenti però solo se il PG ha almeno un oggetto certificato. Un PG
+    // "vuoto" (niente indosso, niente con sé) genera lo stesso messaggio ma
+    // senza alcun link: il testo fisso "- Al suo arrivo," fa da secondo
+    // segnale (vedi stesso fix in parseTavernaMsgEl).
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
+      || /-\s*Al suo arrivo,/.test(wrap.textContent);
     const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
+    // Nessun link avatar per questo tipo di messaggio (vedi sopra): il nome
+    // è comunque il primo token del testo ("NICK  - Al suo arrivo, ...").
+    if (!speaker && isEquipDeclaration) {
+      const raw = wrap.textContent.replace(/\s+/g, ' ').trim();
+      const withoutTime = time ? raw.replace(/^\d{2}:\d{2}\s*/, '') : raw;
+      const m = withoutTime.match(/^(.+?)\s+-\s+/);
+      if (m) speaker = m[1].trim();
+    }
 
     const coordSpan = wrap.querySelector('span.msg-pos-tag');
     const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
@@ -632,11 +645,16 @@
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
     // server per questi messaggi, quindi niente speaker via link ARMInew26)
     // e con link ai certificati reali (target="new", univoco per questo
-    // tipo di messaggio). Niente icona razza non vuol dire niente parlante:
-    // il nome è comunque il primo token del testo ("NICK  - Al suo
-    // arrivo, ha indosso, ..."), recuperato più sotto come fallback quando
-    // speakerFromTavernaBlock non trova nulla.
-    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    // tipo di messaggio) SOLO se il PG ha almeno un oggetto certificato — un
+    // PG "vuoto" (niente indosso, niente con sé) genera lo stesso messaggio
+    // ma senza alcun link, quindi il testo fisso "- Al suo arrivo," fa da
+    // secondo segnale, altrimenti il messaggio ricade su 'azione' e il
+    // parlante resta irriconosciuto ("Sistema"). Niente icona razza non
+    // vuol dire niente parlante: il nome è comunque il primo token del
+    // testo ("NICK  - Al suo arrivo, ha indosso, ..."), recuperato più
+    // sotto come fallback quando speakerFromTavernaBlock non trova nulla.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
+      || /-\s*Al suo arrivo,/.test(wrap.textContent);
 
     const oraEl = wrap.querySelector('span.msg-ora');
     const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
