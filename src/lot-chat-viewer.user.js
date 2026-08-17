@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.80
+// @version      0.0.81
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1268,10 +1268,11 @@
     // colpo d'occhio come "diversi" — effimeri, visibili solo a mittente e
     // destinatario, non un vero messaggio pubblico in chat.
     const COLOR_WHISPER = '#8a6fa8';
-    // Fato: stesso accento magenta/rosa usato dal client reale per il tag
-    // modale F (vedi TAG_COLORS.F più sotto) — coerenza visiva con come lot
-    // già marca tutto ciò che è "fato" altrove nell'interfaccia.
-    const COLOR_FATO = '#c15a94';
+    // Fato: lo stesso bgcolor reale (#502020, un rosso mattone scuro) con
+    // cui lot colora la riga del messaggio Fato nella chat originale, non
+    // un accento inventato — coerenza diretta con l'originale invece che
+    // col tag modale F (colore diverso, usato altrove per il badge).
+    const COLOR_FATO = '#502020';
 
     // In-flow (non fixed): va esattamente al posto di .lot-chat, non
     // sopra a tutta la pagina — un overlay fixed a schermo intero
@@ -2420,15 +2421,8 @@
         skillLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${msg.msgColor || COLOR_GOLD};`;
         card.appendChild(skillLabel);
       }
-      // Fato: non è un dialogo né un'azione di un PG, è la voce del mondo
-      // di gioco stesso — un'etichetta dedicata come per la skill basta a
-      // marcarlo, blocco unico (mai spezzato in azione/parlato).
-      if (isFato) {
-        const fatoLabel = document.createElement('div');
-        fatoLabel.textContent = 'Fato';
-        fatoLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR_FATO};`;
-        card.appendChild(fatoLabel);
-      }
+      // Fato: nessuna etichetta dedicata qui — il nome "Fato" è già nel
+      // header della card (pg.nome), ripeterlo sotto sarebbe ridondante.
       // Immagine: niente fumetto di testo (msg.testo è vuoto per questo
       // tipo), lot mostra l'illustrazione stessa al centro della chat — qui
       // una thumbnail più piccola, zoomabile nello stesso lightbox già
@@ -2449,13 +2443,14 @@
         // bordo dorato pieno basta a farlo notare nella timeline.
         // Fato: stessa sintassi del tipo '+' (narrazione fuori, parlato
         // dentro «»/<>/ecc.) — niente più blocco unico, si spezza in
-        // fumetti azione/parlato come un'azione normale, solo col bordo
-        // magenta dedicato invece del colore reale del messaggio.
+        // fumetti azione/parlato come un'azione normale, con lo stesso
+        // bordo (spesso) del bgcolor reale con cui lot colora la riga del
+        // Fato nella chat originale (COLOR_FATO = #502020).
         card.appendChild(buildSpeechBubbles(
           msg.testo,
           msg.msgType === 'azione' || isFato,
           isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
-          isDice ? true : (isStyledType ? msg.msgBold : false),
+          isDice || isFato ? true : (isStyledType ? msg.msgBold : false),
           msg.msgType === 'equip' || isWhisper || isDice || isSkill,
           isDice ? [
             { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
