@@ -312,6 +312,27 @@
       && /\d{2}:\d{2}/.test(node.textContent);
   }
 
+  // Fato e Immagine (chat_salvate): a differenza di ogni altro tipo di
+  // messaggio, qui NON hanno un proprio <font color="#606060"> di
+  // timestamp che li isoli come blocco — compaiono incollati DENTRO il
+  // flusso piatto subito dopo il messaggio del giocatore precedente,
+  // prima del prossimo timestamp reale (visto in un esempio reale dove
+  // Fato segue la battuta di un PG senza alcun orario proprio). Vanno
+  // quindi riconosciuti e staccati come blocchi a sé PRIMA di finire
+  // impastati nel testo del messaggio del PG a cui sono solo
+  // "attaccati" nel markup — non hanno un vero orario, a differenza di
+  // tutto il resto.
+  function findFatoTd(node) {
+    if (!node || node.nodeType !== 1 || !node.querySelectorAll) return null;
+    const tds = node.tagName === 'TD' ? [node] : Array.from(node.querySelectorAll('td[bgcolor]'));
+    return tds.find((td) => (td.getAttribute('bgcolor') || '').toUpperCase() === '#502020') || null;
+  }
+  function findImmagineImg(node) {
+    if (!node || node.nodeType !== 1) return null;
+    if (node.tagName === 'CENTER') return node.querySelector('img');
+    return null;
+  }
+
   // Ordine di visualizzazione dei tag modali, identico al client reale.
   const TAG_KIND_ORDER = { F: 0, M: 1, L: 2, S: 3, A: 4, P: 5 };
 
@@ -660,22 +681,54 @@
     const messages = [];
     let currentTimeFont = null;
     let currentRest = [];
-    Array.from(chatEl.childNodes).forEach((node) => {
-      if (isGreyTimestampFont(node)) {
-        if (currentTimeFont) {
-          const parsed = parseBlock(currentTimeFont, currentRest, doc);
-          if (parsed) messages.push(parsed);
-        }
-        currentTimeFont = node;
-        currentRest = [];
-      } else if (currentTimeFont) {
-        currentRest.push(node);
-      }
-    });
-    if (currentTimeFont) {
+    // Chiude il blocco eventualmente aperto (parlante con timestamp) prima
+    // di passare a qualcos'altro — condiviso tra il normale avvicendarsi
+    // dei timestamp e l'interruzione forzata da un nodo Fato/Immagine.
+    function flushCurrent() {
+      if (!currentTimeFont) return;
       const parsed = parseBlock(currentTimeFont, currentRest, doc);
       if (parsed) messages.push(parsed);
+      currentTimeFont = null;
+      currentRest = [];
     }
+    Array.from(chatEl.childNodes).forEach((node) => {
+      if (isGreyTimestampFont(node)) {
+        flushCurrent();
+        currentTimeFont = node;
+        currentRest = [];
+        return;
+      }
+      const fatoTd = findFatoTd(node);
+      if (fatoTd) {
+        flushCurrent();
+        const testo = decodeEntitiesOnce(fatoTd.textContent).replace(/\s+/g, ' ').trim();
+        if (testo) {
+          messages.push({
+            time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+            coordRaw: null, posLabel: null, tags: [], med: null, testo,
+            equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
+            msgColor: null, msgBold: false,
+          });
+        }
+        return;
+      }
+      const immagineImg = findImmagineImg(node);
+      if (immagineImg) {
+        flushCurrent();
+        const imageUrl = immagineImg.getAttribute('src');
+        if (imageUrl) {
+          messages.push({
+            time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: null,
+            coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
+            equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
+            msgColor: null, msgBold: false,
+          });
+        }
+        return;
+      }
+      if (currentTimeFont) currentRest.push(node);
+    });
+    flushCurrent();
 
     return { locationName, dateLabel, messages };
   }
@@ -774,7 +827,23 @@
       return {
         time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
         coordRaw: null, posLabel: null, tags: [], med: null, testo,
-        equipRuns: null, unsupportedType: false, msgType: 'fato',
+        equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
+        msgColor: null, msgBold: false,
+      };
+    }
+
+    // Immagine (chat live): struttura dedicata (.msg-immagine), stesso
+    // markup nudo (<center><img></center>) visto anche nel flusso piatto
+    // di chat_salvate — nessun PG dietro, come per il Fato: un'illustrazione
+    // che lot mostra al centro della chat, non una battuta.
+    if (el.classList.contains('msg-immagine')) {
+      const img = wrap.querySelector('img');
+      const imageUrl = img ? img.getAttribute('src') : null;
+      if (!imageUrl) return null;
+      return {
+        time: null, speaker: 'Immagine', razzaIcon: null, razzaLink: null, censoUrl: null,
+        coordRaw: null, posLabel: null, tags: [], med: null, testo: '',
+        equipRuns: null, unsupportedType: false, msgType: 'immagine', imageUrl,
         msgColor: null, msgBold: false,
       };
     }
@@ -2293,10 +2362,10 @@
 
       card.appendChild(header);
 
-      // Il Fato non è mai "in attesa di una coordinata" come un PG appena
-      // arrivato: per design non ne avrà mai una (non è un token sulla
-      // mappa), quindi niente nota "non ancora visibile" qui.
-      if (hasMap && !activePos && msg.msgType !== 'fato') {
+      // Il Fato e l'Immagine non sono mai "in attesa di una coordinata"
+      // come un PG appena arrivato: per design non ne avranno mai una (non
+      // sono token sulla mappa), quindi niente nota "non ancora visibile".
+      if (hasMap && !activePos && msg.msgType !== 'fato' && msg.msgType !== 'immagine') {
         const gapNote = document.createElement('div');
         gapNote.textContent = 'Nessuna coordinata nei suoi messaggi finora: non è ancora visibile sulla mappa.';
         gapNote.style.cssText = `font-size:10.5px;color:${COLOR_EMBER};font-style:italic;`;
@@ -2326,6 +2395,7 @@
       const isDice = msg.msgType === 'dado';
       const isSkill = msg.msgType === 'skill';
       const isFato = msg.msgType === 'fato';
+      const isImmagine = msg.msgType === 'immagine';
       if (isWhisper && msg.sussurroLabel) {
         const whisperLabel = document.createElement('div');
         whisperLabel.textContent = msg.sussurroLabel;
@@ -2352,23 +2422,35 @@
         fatoLabel.style.cssText = `font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR_FATO};`;
         card.appendChild(fatoLabel);
       }
-      // Dado: icona d20 reale di lot + risultato in evidenza invece del
-      // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
-      // pubblico (a differenza del sussurro, niente da nascondere), un
-      // bordo dorato pieno basta a farlo notare nella timeline.
-      card.appendChild(buildSpeechBubbles(
-        msg.testo,
-        msg.msgType === 'azione',
-        isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
-        isDice ? true : (isStyledType ? msg.msgBold : false),
-        msg.msgType === 'equip' || isWhisper || isDice || isSkill || isFato,
-        isDice ? [
-          { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
-          { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
-        ] : msg.equipRuns,
-        isWhisper,
-        isDice || isSkill || msg.msgType === 'equip' || isFato
-      ));
+      // Immagine: niente fumetto di testo (msg.testo è vuoto per questo
+      // tipo), lot mostra l'illustrazione stessa al centro della chat — la
+      // mostriamo così com'è, invece di forzarla nel box parlato/azione.
+      if (isImmagine && msg.imageUrl) {
+        const imgEl = document.createElement('img');
+        imgEl.src = msg.imageUrl;
+        imgEl.alt = '';
+        imgEl.draggable = false;
+        imgEl.style.cssText = `max-width:100%;display:block;border-radius:8px;border:1.5px solid ${COLOR_LINE};`;
+        card.appendChild(imgEl);
+      } else {
+        // Dado: icona d20 reale di lot + risultato in evidenza invece del
+        // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
+        // pubblico (a differenza del sussurro, niente da nascondere), un
+        // bordo dorato pieno basta a farlo notare nella timeline.
+        card.appendChild(buildSpeechBubbles(
+          msg.testo,
+          msg.msgType === 'azione',
+          isWhisper ? COLOR_WHISPER : (isDice ? COLOR_GOLD : (isFato ? COLOR_FATO : (isStyledType ? msg.msgColor : null))),
+          isDice ? true : (isStyledType ? msg.msgBold : false),
+          msg.msgType === 'equip' || isWhisper || isDice || isSkill || isFato,
+          isDice ? [
+            { type: 'icon', src: DICE_ICON_URL, alt: 'd20' },
+            { type: 'text', value: `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}` },
+          ] : msg.equipRuns,
+          isWhisper,
+          isDice || isSkill || msg.msgType === 'equip' || isFato
+        ));
+      }
 
       return card;
     }
@@ -2402,14 +2484,16 @@
       const isDicePreview = msg.msgType === 'dado';
       const isSkillPreview = msg.msgType === 'skill';
       const isFatoPreview = msg.msgType === 'fato';
+      const isImmaginePreview = msg.msgType === 'immagine';
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
       pv.textContent = isWhisperPreview ? `${msg.sussurroLabel || 'sussurro'}: ${preview}`
         : isDicePreview ? `Tiro di dadi: ${msg.diceRoll} su ${msg.diceMax}`
         : isSkillPreview ? `Skill: ${preview}`
         : isFatoPreview ? `Fato: ${preview}`
+        : isImmaginePreview ? 'Immagine'
         : preview;
-      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : isFatoPreview ? COLOR_FATO : COLOR_TEXT_DIM};font-style:${isWhisperPreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview || isFatoPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      pv.style.cssText = `font-size:10.5px;color:${isWhisperPreview ? COLOR_WHISPER : isDicePreview ? COLOR_GOLD : isSkillPreview ? (msg.msgColor || COLOR_GOLD) : isFatoPreview ? COLOR_FATO : COLOR_TEXT_DIM};font-style:${isWhisperPreview || isImmaginePreview ? 'italic' : 'normal'};font-weight:${isDicePreview || isSkillPreview || isFatoPreview ? '700' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
       cbody.appendChild(nm);
       cbody.appendChild(pv);
       row.appendChild(cbody);

@@ -88,14 +88,13 @@ Gestiti, con parlante riconosciuto e resa dedicata (live e replay):
 - **Tiro di dadi** (`6`) — blocco unico squadrato (stile azione, non stondato come il parlato), icona d20 reale di lot + risultato in evidenza ("Tiro di dadi: X su Y") invece del testo grezzo, bordo dorato
 - **Skill** (`S`) — blocco unico squadrato, etichetta "Skill" ed evidenziato col colore reale con cui lot mostra quel preciso messaggio
 - **Sussurro** (`@`) — blocco unico con bordo tratteggiato ed etichetta ("sussurra a ...") a marcarlo come effimero/privato rispetto ai messaggi pubblici
-- **Fato/destino** (`Z`, solo chat live) — non ha un PG dietro, è il mondo di gioco stesso a parlare: blocco unico etichettato "Fato", icona dedicata (l'anello di lot) al posto dello stemma, niente coordinata/posizione sulla mappa per design
+- **Fato/destino** (`Z`) — non ha un PG dietro, è il mondo di gioco stesso a parlare: blocco unico etichettato "Fato", icona dedicata (l'anello di lot) al posto dello stemma, niente coordinata/posizione sulla mappa per design. In chat_salvate compare incollato nel flusso senza un proprio timestamp: riconosciuto e staccato come blocco a sé prima di finire impastato nel messaggio del giocatore precedente
+- **Immagine** (`I`) — nessun PG dietro come il Fato, l'illustrazione stessa mostrata al centro della card al posto di un fumetto di testo; stessa gestione dello split senza timestamp proprio in chat_salvate
 
 Non ancora gestiti — visibili in timeline ma senza parlante riconosciuto ("Sistema") né stile dedicato, nessun esempio reale sotto mano per implementarli:
 
 - **Moderazione** (`M`)
 - **Admin/azione speciale** (`A`)
-- **Immagine** (`I`)
-- **Fato/destino** (`Z`) in replay di chat salvata (`chat_salvate.asp`) — gestito solo lato chat live per ora
 
 Non ancora presente:
 
