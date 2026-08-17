@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.76
+// @version      0.0.77
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -421,10 +421,17 @@
     return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
   }
 
+  // Un nick PG reale non contiene mai spazi/virgolette/parentesi angolari:
+  // il taglio va oltre il solito '&' perché lot genera, SOLO per lo
+  // speaker delle skill in replay, un href malformato — un <img> annidato
+  // per errore dentro il valore dell'attributo invece che come figlio
+  // dell'<a> (es. href="../avatar.asp?id=Alderick target=result><IMG
+  // SRC=...") — che senza questo taglio extra fa leggere come nick
+  // "Alderick target=result><IMG SRC=" invece del solo "Alderick".
   function speakerFromBlock(wrap) {
     const avatarLink = wrap.querySelector('a[href*="avatar.asp?id="]');
     if (!avatarLink) return null;
-    const m = avatarLink.getAttribute('href').match(/id=([^&]+)/);
+    const m = avatarLink.getAttribute('href').match(/id=([^&\s<>"']+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
 
@@ -683,7 +690,11 @@
   function speakerFromTavernaBlock(el) {
     const link = el.querySelector('a[href*="ARMInew26.asp"]');
     if (!link) return null;
-    const m = link.getAttribute('href').match(/ID=([^&'"]+)/);
+    // Stesso taglio extra (spazi/parentesi angolari) di speakerFromBlock —
+    // qui non si è ancora visto un href malformato analogo, ma è la
+    // stessa identica classe di rischio (nick mai contenente questi
+    // caratteri), meglio prevenirlo che scoprirlo alla prossima skill.
+    const m = link.getAttribute('href').match(/ID=([^&\s<>"']+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
 
