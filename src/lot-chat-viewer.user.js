@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.81
+// @version      0.0.82
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2429,13 +2429,23 @@
       // usato per il ritratto della scheda PG (openAvatarLightbox), invece
       // di forzarla intera nel box parlato/azione o duplicare l'overlay.
       if (isImmagine && msg.imageUrl) {
+        // Box a dimensione fissa + object-fit:contain sull'<img> (stesso
+        // schema già usato per gli avatar censo/stemma): con solo
+        // max-width/max-height sull'<img> stesso, un qualunque CSS globale
+        // di lot che imponga una width alle immagini (pagine vecchio stile,
+        // spesso a tabelle) la stiracchierebbe fuori rapporto — qui invece
+        // width/height 100% del box fisso + contain garantisce le
+        // proporzioni originali indipendentemente dallo stile della pagina.
+        const thumbBox = document.createElement('div');
+        thumbBox.style.cssText = `width:220px;max-width:100%;height:160px;border-radius:8px;border:1.5px solid ${COLOR_LINE};overflow:hidden;cursor:zoom-in;background:${COLOR_SURFACE};`;
         const thumb = document.createElement('img');
         thumb.src = msg.imageUrl;
         thumb.alt = '';
         thumb.draggable = false;
-        thumb.style.cssText = `max-width:220px;max-height:160px;display:block;border-radius:8px;border:1.5px solid ${COLOR_LINE};cursor:zoom-in;`;
-        thumb.addEventListener('click', () => openAvatarLightbox(msg.imageUrl, 'Immagine'));
-        card.appendChild(thumb);
+        thumb.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+        thumbBox.appendChild(thumb);
+        thumbBox.addEventListener('click', () => openAvatarLightbox(msg.imageUrl, 'Immagine'));
+        card.appendChild(thumbBox);
       } else {
         // Dado: icona d20 reale di lot + risultato in evidenza invece del
         // testo grezzo di lot ("ha tirato i dadi col risultato di X su Y") —
