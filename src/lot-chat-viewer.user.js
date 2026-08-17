@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.68
+// @version      0.0.71
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate*.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -450,7 +450,7 @@
     restNodes.forEach((n) => wrap.appendChild(n.cloneNode(true)));
 
     const msgStyle = resolveSalvataMsgStyle(wrap, timeFontClone);
-    const speaker = speakerFromBlock(wrap);
+    let speaker = speakerFromBlock(wrap);
 
     const razzaImg = wrap.querySelector('img[src*="/razze/"]');
     const razzaIcon = razzaImg ? razzaImg.getAttribute('src') : null;
@@ -468,9 +468,22 @@
     // 'N' e mai per '+'/'S'/'6'. Un drago (nessuna icona speaker, nessuno
     // stemma) ricade quindi correttamente su 'azione', non 'normale'. La
     // dichiarazione oggetti ("Certifica Possesso") resta riconoscibile
-    // dagli stessi link con target="new" già usati in parseTavernaMsgEl.
-    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    // dagli stessi link con target="new" già usati in parseTavernaMsgEl —
+    // presenti però solo se il PG ha almeno un oggetto certificato. Un PG
+    // "vuoto" (niente indosso, niente con sé) genera lo stesso messaggio ma
+    // senza alcun link: il testo fisso "- Al suo arrivo," fa da secondo
+    // segnale (vedi stesso fix in parseTavernaMsgEl).
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
+      || /-\s*Al suo arrivo,/.test(wrap.textContent);
     const msgType = isEquipDeclaration ? 'equip' : (censoUrl ? 'normale' : 'azione');
+    // Nessun link avatar per questo tipo di messaggio (vedi sopra): il nome
+    // è comunque il primo token del testo ("NICK  - Al suo arrivo, ...").
+    if (!speaker && isEquipDeclaration) {
+      const raw = wrap.textContent.replace(/\s+/g, ' ').trim();
+      const withoutTime = time ? raw.replace(/^\d{2}:\d{2}\s*/, '') : raw;
+      const m = withoutTime.match(/^(.+?)\s+-\s+/);
+      if (m) speaker = m[1].trim();
+    }
 
     const coordSpan = wrap.querySelector('span.msg-pos-tag');
     const coordRaw = coordSpan ? decodeEntitiesOnce(coordSpan.textContent).replace(/[[\]]/g, '').trim() : null;
@@ -632,11 +645,16 @@
     // dedicato, tipo '+' ma senza icona razza (msg.razza è vuoto lato
     // server per questi messaggi, quindi niente speaker via link ARMInew26)
     // e con link ai certificati reali (target="new", univoco per questo
-    // tipo di messaggio). Niente icona razza non vuol dire niente parlante:
-    // il nome è comunque il primo token del testo ("NICK  - Al suo
-    // arrivo, ha indosso, ..."), recuperato più sotto come fallback quando
-    // speakerFromTavernaBlock non trova nulla.
-    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]');
+    // tipo di messaggio) SOLO se il PG ha almeno un oggetto certificato — un
+    // PG "vuoto" (niente indosso, niente con sé) genera lo stesso messaggio
+    // ma senza alcun link, quindi il testo fisso "- Al suo arrivo," fa da
+    // secondo segnale, altrimenti il messaggio ricade su 'azione' e il
+    // parlante resta irriconosciuto ("Sistema"). Niente icona razza non
+    // vuol dire niente parlante: il nome è comunque il primo token del
+    // testo ("NICK  - Al suo arrivo, ha indosso, ..."), recuperato più
+    // sotto come fallback quando speakerFromTavernaBlock non trova nulla.
+    const isEquipDeclaration = !!wrap.querySelector('a[target="new"]')
+      || /-\s*Al suo arrivo,/.test(wrap.textContent);
 
     const oraEl = wrap.querySelector('span.msg-ora');
     const timeMatch = oraEl ? oraEl.textContent.match(/(\d{2}:\d{2})/) : null;
@@ -976,10 +994,11 @@
   function renderTimeline(chatParsed, pgRecords, mappa, opts) {
     opts = opts || {};
     const mode = opts.mode || 'replay'; // 'replay' (chat_salvate) | 'live' (chat_taverne)
-    if (!mappa.mapUrl) {
-      console.warn('[lot-chat-viewer] niente mapUrl, salto il rendering scena');
-      return;
-    }
+    // Non tutti i luoghi hanno una mappa disponibile (es. Covo): niente
+    // early-return in quel caso, la scena si costruisce comunque, solo
+    // senza il riquadro mappa/griglia/token (vedi hasMap più sotto) — solo
+    // testo/fumetti con la nostra grafica, come per il resto della chat.
+    const hasMap = !!mappa.mapUrl;
     const existing = document.getElementById('lot-chat-viewer-scene');
     if (existing) existing.remove();
     if (!chatParsed.messages.length) {
@@ -1238,6 +1257,15 @@
       equipShell.overlay.style.display = 'flex';
     }
 
+    // updateFitScale/applyView/updateTokens sono richiamate anche da
+    // layoutPanel()/draw() più sotto, fuori da questo blocco — pre-
+    // dichiarate qui come no-op, diventano le funzioni vere qui sotto solo
+    // se c'è una mappa da costruire (hasMap).
+    let updateFitScale = () => {};
+    let applyView = () => {};
+    let updateTokens = () => {};
+
+    if (hasMap) {
     // ---------- viewport mappa: pan/zoom in un riquadro quadrato --------
     // wrapper (centra) > viewport (quadrato, pannabile/zoomabile) > zoom
     // (transform pan+scale) > plane (dimensione nativa mappa+margine) >
@@ -1389,10 +1417,10 @@
     ].join(';');
     viewport.appendChild(hoverCoordEl);
 
-    function updateFitScale() {
+    updateFitScale = function() {
       const rect = viewport.getBoundingClientRect();
       fitScale = rect.width > 0 ? (rect.width / (mappa.mapWidth + LABEL_MARGIN_LEFT)) : 1;
-    }
+    };
 
     function renderRuler() {
       rulerCol.innerHTML = '';
@@ -1419,7 +1447,7 @@
       }
     }
 
-    function applyView() {
+    applyView = function() {
       const scale = (fitScale || 1) * view.zoom;
       stageZoom.style.transform = `translate(${view.panX}px,${view.panY}px) scale(${scale})`;
       zoomReadout.textContent = Math.round(view.zoom * 100) + '%';
@@ -1449,20 +1477,13 @@
           updateTokens(chatParsed.messages.slice(0, index + 1), pgRecords, { recenter: false });
         }
       }
-    }
+    };
 
     function resetView() {
       view.zoom = 1; view.panX = 0; view.panY = 0;
       applyView();
     }
     resetViewBtn.addEventListener('click', resetView);
-    // layoutPanel (definita più sotto, ma le funzioni sono hoisted) rifà
-    // anche altezza/top del pannello, non solo fitScale: senza, ingrandire
-    // la finestra (es. popup chat_salvate portato a schermo intero) non
-    // faceva crescere la mappa, restava vincolata all'altezza calcolata al
-    // primo caricamento quando la finestra era ancora piccola.
-    window.addEventListener('resize', () => { layoutPanel(); });
-
     viewport.addEventListener('wheel', (e) => {
       e.preventDefault();
       const rect = viewport.getBoundingClientRect();
@@ -1652,6 +1673,11 @@
         img.alt = '';
         img.draggable = false;
         img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+        // Alcuni layer (accessori tipo "manette") su lot puntano a
+        // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
+        // si vede nulla), ma senza questa gestione qui compare l'icona di
+        // immagine non trovata del browser sopra il modellino.
+        img.addEventListener('error', () => img.remove());
         sprite.appendChild(img);
       });
       const shadow = document.createElement('div');
@@ -1689,7 +1715,7 @@
       return arrow;
     }
 
-    function updateTokens(messages, pgRecords, opts) {
+    updateTokens = function(messages, pgRecords, opts) {
       const recenter = !opts || opts.recenter !== false;
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
@@ -1844,7 +1870,8 @@
       });
 
       if (recenter) centerOnActiveToken(activePos, compact ? null : activeSpriteEl);
-    }
+    };
+    } // fine if (hasMap)
 
     const sidebar = document.createElement('div');
     sidebar.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;';
@@ -2226,6 +2253,10 @@
       updateFitScale();
       applyView();
     }
+    // Ricalcola anche senza mappa (updateFitScale/applyView sono no-op in
+    // quel caso, ma layoutPanel rifà comunque l'altezza del pannello in
+    // replay) — es. popup chat_salvate portato a schermo intero.
+    window.addEventListener('resize', () => { layoutPanel(); });
     layoutPanel();
     draw();
     sceneVisible = true;

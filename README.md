@@ -35,7 +35,7 @@ Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampe
 
 ## Come usarlo — chat live (uso principale)
 
-1. **Entra in una chat** in gioco, come faresti normalmente (`chat_taverne.asp`, caricata in un iframe della pagina).
+1. **Entra in una chat** in gioco, come faresti normalmente.
 2. Lo script si attiva da solo, sostituendo l'area messaggi con la scena (mappa a sinistra, timeline a destra) — toolbar e barra di scrittura restano dove sono, invariate.
 3. La scena si aggiorna da sola quando arrivano nuovi messaggi (segue sempre l'ultimo, come uno scroll che si autoaggiorna). Zoom e posizione sulla mappa scelti a mano restano quelli anche dopo un aggiornamento.
 4. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat live di lot — utile anche solo per scrivere più comodamente restando sulla vista di lot, la scena riprende da dove era rimasta al prossimo "mostra".
@@ -43,8 +43,8 @@ Aggiornamenti successivi dello script verranno rilevati automaticamente da Tampe
 ## Come usarlo — replay di una chat salvata
 
 1. **Prima di tutto, portati sulla mappa di lot nella locazione della chat che vuoi rileggere.** È necessario perché lo script recupera l'immagine e la griglia della mappa dalla pagina mappa reale del luogo in cui il tuo PG si trova *ora* — non da dove si trovava quando quella chat fu giocata. Se il PG è altrove, lo script non trova nessuna mappa da mostrare.
-2. **In una chat qualsiasi** (non serve essere in quella specifica locazione: il Registro CHAT elenca tutte le chat salvate a cui hai partecipato, ovunque fossero), apri la toolbar in basso e clicca l'icona **"Registro chat"** (il libro). Si apre una modale con l'elenco.
-3. Clicca la chat che vuoi rileggere: si apre una **nuova finestra** su `chat_salvate*.asp` con il testo grezzo di quella sessione.
+2. Apri la toolbar in basso e clicca l'icona **"Registro chat"** (il libro). Si apre una modale con l'elenco.
+3. Clicca la chat che vuoi rileggere: si apre una **nuova finestra** con il testo grezzo di quella sessione.
 4. Su quella nuova finestra, lo script si attiva da solo, sostituendo il testo grezzo con la scena. Se non parte da solo, ricarica la pagina.
 5. Il banner in alto a destra mostra/nasconde la scena in qualsiasi momento, tornando al testo originale della chat.
 
@@ -57,12 +57,12 @@ Nota: la mappa mostra solo l'immagine e la griglia del luogo — i movimenti dei
    - il passaggio 3 sopra (Allow User Scripts) su Chrome/Edge — causa più comune
    - che l'interruttore generale di Tampermonkey (icona dell'estensione in barra) sia ON, non in pausa
    - nella dashboard di Tampermonkey (Installed userscripts), che "lot-chat-viewer" sia abilitato
-   - che l'URL della pagina inizi con `https://www.extremelot.eu/proc/chat/chat_taverne` (live) o `chat_salvate` (replay) — lo script non si attiva altrove
+   - che tu sia effettivamente su una pagina di chat (live o replay di una chat salvata) — lo script non si attiva altrove
 3. **La riga c'è, dice "banner agganciato a BODY", ma non lo vedi comunque** → probabile conflitto CSS con la pagina; apri una issue nel repo con uno screenshot.
 
 ## Stato
 
-Chat **live** (`chat_taverne.asp`), uso principale:
+Chat **live**, uso principale:
 
 - Sostituisce solo l'area messaggi, toolbar/barra di scrittura sempre intatte e funzionanti
 - Scena aggiornata in automatico ai nuovi messaggi, anche mentre la scena è nascosta e si sta guardando la vista originale di lot
@@ -70,18 +70,18 @@ Chat **live** (`chat_taverne.asp`), uso principale:
 - Messaggi di dichiarazione oggetti ("Certifica Possesso in Gioco") attribuiti correttamente al PG, mostrati come blocco unico
 - Gestione di testo con `«»`/`<>`/ecc. annidati o spaiati (frequenti nelle formule di incantesimo) senza corrompere la suddivisione in fumetti
 
-Replay di una chat salvata (`chat_salvate*.asp`):
+Replay di una chat salvata:
 
 - Mappa del luogo con griglia, pan (trascinamento) e zoom (rotellina, verso il cursore), righello lettere/numeri, coordinata sotto il cursore
 - Personaggi come stemma compatto (zoom basso) o modellino intero a layer corpo/vestito (zoom alto), con ventaglio automatico quando più PG condividono una cella, PG che sta parlando evidenziato (cella colorata, e sul modellino intero anche freccia + glow)
 - Timeline dei messaggi navigabile (◀▶ o click su una battuta), testo diviso in fumetti azione/parlato, tag modali colorati (posizione/status/arcani/png/fato/missione)
 - Click su un personaggio: popup con ritratto (zoomabile), descrizione fisica, e collegamento a un secondo popup con indossati / con sé / equip bellico (icone cliccabili verso il certificato reale dell'oggetto)
 - Messaggi con parlante non riconoscibile (es. sistema/dado/sussurro) restano visibili con una nota, invece di sparire in silenzio
+- Luoghi senza mappa disponibile (es. Covo): scena solo testo/fumetti con la nostra grafica, senza riquadro mappa/griglia/token
 
 Non ancora presente:
 
 - Animazione di movimento dei personaggi da una cella all'altra (oggi lo spostamento è istantaneo)
-- Selettore di luogo/chat (qui non serve: la chat è già quella aperta nella pagina)
 - Sussurri e messaggi di moderazione/admin in chat live: restano visibili ma senza parlante riconosciuto ("Sistema")
 
 Vedi le issue del repo per lo stato di avanzamento dettagliato.
