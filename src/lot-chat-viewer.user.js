@@ -1551,6 +1551,12 @@
     let updateFitScale = () => {};
     let applyView = () => {};
     let updateTokens = () => {};
+    // Riferimento allo stageWrap (assegnato dentro il blocco hasMap qui
+    // sotto) e stato mostra/nascondi mappa: opts.mapVisible, se passato
+    // dal chiamante (live), è lo stesso oggetto persistito tra un rebuild
+    // e l'altro — stessa filosofia di opts.view più sopra.
+    let stageWrap = null;
+    const mapVisibleRef = opts.mapVisible || { value: true };
 
     if (hasMap) {
     // ---------- viewport mappa: pan/zoom in un riquadro quadrato --------
@@ -1580,8 +1586,9 @@
     let fitScale = 1;
     let lastActiveCoordLabel = null;
 
-    const stageWrap = document.createElement('div');
+    stageWrap = document.createElement('div');
     stageWrap.style.cssText = 'flex:1 1 0;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;';
+    if (!mapVisibleRef.value) stageWrap.style.display = 'none';
     stageFrame.appendChild(stageWrap);
 
     const viewport = document.createElement('div');
@@ -2198,6 +2205,28 @@
         'width:28px', 'height:28px', 'border-radius:50%', 'cursor:pointer', 'font-size:13px',
       ].join(';');
     });
+    // Toggle mostra/nascondi mappa: solo nei luoghi che ne hanno una
+    // (hasMap) — altrove la chat è già a schermo intero, niente da
+    // nascondere. A mappa nascosta la sidebar (flex:1 1 0, unica figlia
+    // rimasta di stageFrame) si espande da sola a tutta larghezza, niente
+    // calcolo manuale. Nel gruppo "controls" (a destra, con ◀▶) invece che
+    // in sidebarHeader: quest'ultima è a due soli blocchi (space-between),
+    // un terzo figlio spezzerebbe quel layout.
+    if (hasMap) {
+      const toggleMapBtn = document.createElement('button');
+      toggleMapBtn.textContent = mapVisibleRef.value ? 'Nascondi mappa' : 'Mostra mappa';
+      toggleMapBtn.title = 'Mostra/nascondi la mappa';
+      toggleMapBtn.style.cssText = [
+        'appearance:none', `border:1px solid ${COLOR_LINE}`, `background:${COLOR_BG}`, `color:${COLOR_TEXT_DIM}`,
+        'padding:5px 10px', 'border-radius:14px', 'cursor:pointer', 'font-size:11px', 'white-space:nowrap',
+      ].join(';');
+      toggleMapBtn.addEventListener('click', () => {
+        mapVisibleRef.value = !mapVisibleRef.value;
+        stageWrap.style.display = mapVisibleRef.value ? 'flex' : 'none';
+        toggleMapBtn.textContent = mapVisibleRef.value ? 'Nascondi mappa' : 'Mostra mappa';
+      });
+      controls.appendChild(toggleMapBtn);
+    }
     controls.appendChild(prevBtn);
     controls.appendChild(counter);
     controls.appendChild(nextBtn);
@@ -2685,6 +2714,7 @@
     // messaggio.
     const liveContainer = document.getElementById('chat-messages');
     const liveView = { zoom: 1, panX: 0, panY: 0 };
+    const liveMapVisible = { value: true };
     let liveMappa = null;
     let liveDebounce = null;
 
@@ -2711,7 +2741,7 @@
           // versione ferma all'ultimo momento in cui era visibile, perdendo
           // tutti i messaggi arrivati nel frattempo. Si evita solo di
           // toccare il DOM adesso se non è comunque visibile.
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView });
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, mapVisible: liveMapVisible });
           if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
