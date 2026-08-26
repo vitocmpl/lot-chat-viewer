@@ -70,6 +70,7 @@ Chat **live**, uso principale:
 - Messaggi di dichiarazione oggetti ("Certifica Possesso in Gioco") attribuiti correttamente al PG, mostrati come blocco unico
 - Gestione di testo con `«»`/`<>`/ecc. annidati o spaiati (frequenti nelle formule di incantesimo) senza corrompere la suddivisione in fumetti
 - Il proprio nome PG viene evidenziato quando compare nelle battute altrui, come fa lot nativamente in chat — così si nota subito chi ci ha citato. Il nome viene letto una sola volta all'avvio da `b_all.asp` (stessa pagina della toolbar principale); se non riesce a determinarlo l'evidenziazione resta semplicemente disattivata, senza impatto sul resto
+- Se si sta leggendo un messaggio precedente quando ne arriva uno nuovo, la vista non salta più via da sola: resta ferma su quello aperto, con una pillola "torna al live" (col conteggio dei nuovi messaggi arrivati nel frattempo) che riaggancia l'ultimo messaggio con un click — oppure si può risalire a mano con ▶
 
 Replay di una chat salvata:
 
