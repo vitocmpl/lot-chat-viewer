@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.90
+// @version      0.0.91
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1349,32 +1349,32 @@
       return;
     }
 
-    // In live segue sempre l'ultimo messaggio arrivato (come uno scroll di
-    // chat che si autoaggiorna) — MA solo finché l'utente non si è messo a
-    // leggere un messaggio precedente: da quel momento opts.nav.following
-    // passa a false e il rebuild (uno per ogni nuovo messaggio, vedi
-    // resolveAndRenderLive più sotto) deve ripartire dalla stessa card che
-    // si stava leggendo invece di far saltare la vista sull'ultimo arrivato
-    // — nav è lo stesso oggetto passato per riferimento ad ogni rebuild
-    // (stessa filosofia di liveView per zoom/pan), quindi la posizione
-    // sopravvive alla ricostruzione completa dello stage. In replay parte
-    // dal primo, l'utente naviga a mano con ◀▶, nessun nav da persistere
-    // (un solo parse, mai più rebuild).
-    const nav = mode === 'live' ? (opts.nav || { index: -1, following: true }) : null;
+    // Il PRIMO render in live parte dall'ultimo messaggio arrivato finora
+    // (nav.index ancora -1, sentinella "mai mostrato nulla"); da quel
+    // momento in poi la posizione non viene più spostata in automatico ad
+    // ogni nuovo messaggio, nemmeno se ci si trovava già sull'ultimo — un
+    // rebuild (uno per ogni nuovo arrivo, vedi resolveAndRenderLive più
+    // sotto) che facesse "avanzare da solo" interromperebbe la lettura di
+    // quello che era l'ultimo messaggio nel momento in cui lo si stava
+    // ancora leggendo, diventato nel frattempo il penultimo. Si avanza solo
+    // per azione esplicita (◀▶, click su una card, o la pillola "torna al
+    // live"), che scrive su nav.index — stesso oggetto passato per
+    // riferimento ad ogni rebuild (filosofia già in uso per zoom/pan della
+    // mappa in liveView), quindi la posizione sopravvive alla ricostruzione
+    // completa dello stage. In replay parte dal primo, l'utente naviga a
+    // mano con ◀▶, nessun nav da persistere (un solo parse, mai più
+    // rebuild).
+    const nav = mode === 'live' ? (opts.nav || { index: -1 }) : null;
     let index;
     if (mode !== 'live') {
       index = 0;
-    } else if (!nav.following && nav.index >= 0) {
-      index = Math.min(nav.index, chatParsed.messages.length - 1);
     } else {
-      index = chatParsed.messages.length - 1;
+      index = nav.index >= 0 ? Math.min(nav.index, chatParsed.messages.length - 1) : chatParsed.messages.length - 1;
+      nav.index = index;
     }
     function setIndex(i) {
       index = i;
-      if (nav) {
-        nav.index = index;
-        nav.following = index >= chatParsed.messages.length - 1;
-      }
+      if (nav) nav.index = index;
       draw();
     }
 
@@ -2317,13 +2317,14 @@
       });
       controls.appendChild(toggleMapBtn);
     }
-    // Pillola "torna al live": visibile solo quando nav.following è false,
-    // cioè quando ci si è staccati dall'ultimo messaggio per leggerne uno
-    // precedente (vedi nav più sopra) — un click riaggancia direttamente
-    // all'ultimo arrivato e riattiva l'autofollow per i rebuild successivi.
-    // Nascosta di default in draw() qui sotto, non solo in replay: in live
-    // compare/scompare a runtime a seconda di dove ci si trova nella
-    // timeline, mai un vero "controllo statico" come prevBtn/nextBtn.
+    // Pillola "torna al live": visibile ogni volta che l'indice mostrato
+    // non è più l'ultimo messaggio arrivato — cosa che ormai può capitare
+    // anche senza aver mai cliccato indietro, visto che i rebuild non
+    // avanzano più da soli (vedi nav più sopra). Un click riaggancia
+    // direttamente all'ultimo arrivato. Nascosta di default in draw() qui
+    // sotto, non solo in replay: in live compare/scompare a runtime a
+    // seconda di dove ci si trova nella timeline, mai un vero "controllo
+    // statico" come prevBtn/nextBtn.
     let catchupBtn = null;
     if (nav) {
       catchupBtn = document.createElement('button');
@@ -2832,12 +2833,12 @@
     const liveMapVisible = { value: true };
     // Stessa filosofia di liveView/liveMapVisible: sopravvive al rebuild
     // completo perché è lo stesso oggetto passato per riferimento ad ogni
-    // renderTimeline (vedi nav lì dentro). following=false appena l'utente
-    // clicca indietro o su una card precedente — da quel momento un nuovo
-    // messaggio in arrivo non fa più saltare la vista, resta ferma
+    // renderTimeline (vedi nav lì dentro). index resta -1 solo finché non
+    // si è mai mostrato nulla; da quel primo render in poi un nuovo
+    // messaggio non sposta più la vista in automatico, si resta fermi
     // sull'indice che si stava leggendo finché non si clicca "torna al
-    // live" (o si naviga avanti a mano fino a raggiungere l'ultimo).
-    const liveNav = { index: -1, following: true };
+    // live" (o si naviga avanti a mano).
+    const liveNav = { index: -1 };
     let liveMappa = null;
     let liveDebounce = null;
 
