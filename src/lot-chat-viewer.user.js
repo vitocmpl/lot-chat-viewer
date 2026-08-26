@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.89
+// @version      0.0.91
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1349,10 +1349,34 @@
       return;
     }
 
-    // In live segue sempre l'ultimo messaggio arrivato (come uno scroll di
-    // chat che si autoaggiorna); in replay parte dal primo, l'utente naviga
-    // a mano con ◀▶.
-    let index = mode === 'live' ? chatParsed.messages.length - 1 : 0;
+    // Il PRIMO render in live parte dall'ultimo messaggio arrivato finora
+    // (nav.index ancora -1, sentinella "mai mostrato nulla"); da quel
+    // momento in poi la posizione non viene più spostata in automatico ad
+    // ogni nuovo messaggio, nemmeno se ci si trovava già sull'ultimo — un
+    // rebuild (uno per ogni nuovo arrivo, vedi resolveAndRenderLive più
+    // sotto) che facesse "avanzare da solo" interromperebbe la lettura di
+    // quello che era l'ultimo messaggio nel momento in cui lo si stava
+    // ancora leggendo, diventato nel frattempo il penultimo. Si avanza solo
+    // per azione esplicita (◀▶, click su una card, o la pillola "torna al
+    // live"), che scrive su nav.index — stesso oggetto passato per
+    // riferimento ad ogni rebuild (filosofia già in uso per zoom/pan della
+    // mappa in liveView), quindi la posizione sopravvive alla ricostruzione
+    // completa dello stage. In replay parte dal primo, l'utente naviga a
+    // mano con ◀▶, nessun nav da persistere (un solo parse, mai più
+    // rebuild).
+    const nav = mode === 'live' ? (opts.nav || { index: -1 }) : null;
+    let index;
+    if (mode !== 'live') {
+      index = 0;
+    } else {
+      index = nav.index >= 0 ? Math.min(nav.index, chatParsed.messages.length - 1) : chatParsed.messages.length - 1;
+      nav.index = index;
+    }
+    function setIndex(i) {
+      index = i;
+      if (nav) nav.index = index;
+      draw();
+    }
 
     // Layout a schermo intero, due colonne (mappa | timeline) — senza una
     // toolbar di selezione in alto: qui la chat è già quella aperta nella
@@ -2293,6 +2317,26 @@
       });
       controls.appendChild(toggleMapBtn);
     }
+    // Pillola "torna al live": visibile ogni volta che l'indice mostrato
+    // non è più l'ultimo messaggio arrivato — cosa che ormai può capitare
+    // anche senza aver mai cliccato indietro, visto che i rebuild non
+    // avanzano più da soli (vedi nav più sopra). Un click riaggancia
+    // direttamente all'ultimo arrivato. Nascosta di default in draw() qui
+    // sotto, non solo in replay: in live compare/scompare a runtime a
+    // seconda di dove ci si trova nella timeline, mai un vero "controllo
+    // statico" come prevBtn/nextBtn.
+    let catchupBtn = null;
+    if (nav) {
+      catchupBtn = document.createElement('button');
+      catchupBtn.title = 'Torna all\'ultimo messaggio e riprendi a seguire la chat live';
+      catchupBtn.style.cssText = [
+        'appearance:none', `border:1px solid ${COLOR_EMBER}`, `background:${COLOR_BG}`, `color:${COLOR_EMBER}`,
+        'padding:5px 10px', 'border-radius:14px', 'cursor:pointer', 'font-size:11px', 'font-weight:700',
+        'white-space:nowrap', 'display:none',
+      ].join(';');
+      catchupBtn.addEventListener('click', () => setIndex(chatParsed.messages.length - 1));
+      controls.appendChild(catchupBtn);
+    }
     controls.appendChild(prevBtn);
     controls.appendChild(counter);
     controls.appendChild(nextBtn);
@@ -2665,7 +2709,7 @@
       time.style.cssText = `font-size:10px;color:${COLOR_TEXT_DIM};font-variant-numeric:tabular-nums;flex:0 0 auto;`;
       row.appendChild(time);
 
-      row.addEventListener('click', () => { index = idx; draw(); });
+      row.addEventListener('click', () => { setIndex(idx); });
       return row;
     }
 
@@ -2697,10 +2741,15 @@
       counter.textContent = (index + 1) + ' di ' + chatParsed.messages.length + ' · ' + chatParsed.messages[index].time;
       prevBtn.disabled = index <= 0;
       nextBtn.disabled = index >= chatParsed.messages.length - 1;
+      if (catchupBtn) {
+        const behind = chatParsed.messages.length - 1 - index;
+        catchupBtn.style.display = behind > 0 ? 'inline-block' : 'none';
+        catchupBtn.textContent = '● torna al live' + (behind > 1 ? ` (${behind} nuovi)` : '');
+      }
     }
 
-    prevBtn.addEventListener('click', () => { if (index > 0) { index -= 1; draw(); } });
-    nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) { index += 1; draw(); } });
+    prevBtn.addEventListener('click', () => { if (index > 0) setIndex(index - 1); });
+    nextBtn.addEventListener('click', () => { if (index < chatParsed.messages.length - 1) setIndex(index + 1); });
 
     // Va inserito subito dopo l'area messaggi originale (non in coda al
     // body): in replay resta così nel punto naturale del layout, sotto
@@ -2782,6 +2831,14 @@
     const liveContainer = document.getElementById('chat-messages');
     const liveView = { zoom: 1, panX: 0, panY: 0 };
     const liveMapVisible = { value: true };
+    // Stessa filosofia di liveView/liveMapVisible: sopravvive al rebuild
+    // completo perché è lo stesso oggetto passato per riferimento ad ogni
+    // renderTimeline (vedi nav lì dentro). index resta -1 solo finché non
+    // si è mai mostrato nulla; da quel primo render in poi un nuovo
+    // messaggio non sposta più la vista in automatico, si resta fermi
+    // sull'indice che si stava leggendo finché non si clicca "torna al
+    // live" (o si naviga avanti a mano).
+    const liveNav = { index: -1 };
     let liveMappa = null;
     let liveDebounce = null;
 
@@ -2809,7 +2866,7 @@
           // versione ferma all'ultimo momento in cui era visibile, perdendo
           // tutti i messaggi arrivati nel frattempo. Si evita solo di
           // toccare il DOM adesso se non è comunque visibile.
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, mapVisible: liveMapVisible });
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav });
           if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
