@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.94
+// @version      0.0.95
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -481,17 +481,20 @@
 
   // Non è una funzionalità della piattaforma, solo una convenzione informale
   // fra giocatori: a fine dell'ultima battuta in una locazione si aggiungono
-  // spesso caratteri come // \\ / \ per segnalare "sto uscendo di scena".
+  // spesso caratteri come // \\ / \ per segnalare "sto uscendo di scena" —
+  // a volte isolati da uno spazio, a volte incollati all'ultima parola,
+  // spesso seguiti da un segno di punteggiatura residuo (es. "fatale//.").
   // lot non espone alcuna azione esplicita che tolga un PG dalla griglia
   // della mappa (l'unico modo per aggiornare la posizione è un nuovo tag di
   // coordinata su un nuovo messaggio) — senza questa euristica un PG che ha
   // lasciato il luogo da tempo resterebbe visibile per sempre sull'ultima
   // cella nota. Euristica volutamente conservativa e non solida (nessuna
-  // convenzione ufficiale dietro): il marcatore deve essere l'ultimo
-  // "token" del messaggio (isolato da uno spazio, o l'intero testo) per non
-  // scattare su un normale "/" di punteggiatura dentro una frase — resta
-  // comunque un'approssimazione, da affinare quando si vedranno più casi
-  // reali.
+  // convenzione ufficiale dietro), da affinare quando si vedranno più casi
+  // reali: il marcatore raddoppiato (// o \\) scatta anche incollato a una
+  // parola, perché due caratteri uguali di fila a fine frase non sono mai
+  // normale punteggiatura; quello singolo (/ o \) invece scatta solo se
+  // isolato da uno spazio, per non confonderlo con uno slash qualunque
+  // dentro il testo (es. una frazione "1/2").
   //
   // Controllato sull'ULTIMO segmento prodotto da splitSegments (stessa
   // funzione usata per spezzare il messaggio nei fumetti mostrati), non sul
@@ -504,7 +507,7 @@
   // dell'IIFE, valutati in ordine — quelle funzioni vengono chiamate a
   // caricamento script, prima ancora che venga dichiarato qualunque const
   // più in basso nel file, quindi EXIT_MARKER_RE deve già esistere qui).
-  const EXIT_MARKER_RE = /(?:^|\s)(\/{1,2}|\\{1,2})$/;
+  const EXIT_MARKER_RE = /(?:(?:^|\s)[\\/]|[\\/]{2})[.,;:!?]*$/;
   function detectExitMarker(testo, invert) {
     if (!testo) return false;
     const segs = splitSegments(testo, invert);
