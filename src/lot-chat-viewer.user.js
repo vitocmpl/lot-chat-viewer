@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.91
+// @version      0.0.95
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -479,6 +479,42 @@
     return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
   }
 
+  // Non è una funzionalità della piattaforma, solo una convenzione informale
+  // fra giocatori: a fine dell'ultima battuta in una locazione si aggiungono
+  // spesso caratteri come // \\ / \ per segnalare "sto uscendo di scena" —
+  // a volte isolati da uno spazio, a volte incollati all'ultima parola,
+  // spesso seguiti da un segno di punteggiatura residuo (es. "fatale//.").
+  // lot non espone alcuna azione esplicita che tolga un PG dalla griglia
+  // della mappa (l'unico modo per aggiornare la posizione è un nuovo tag di
+  // coordinata su un nuovo messaggio) — senza questa euristica un PG che ha
+  // lasciato il luogo da tempo resterebbe visibile per sempre sull'ultima
+  // cella nota. Euristica volutamente conservativa e non solida (nessuna
+  // convenzione ufficiale dietro), da affinare quando si vedranno più casi
+  // reali: il marcatore raddoppiato (// o \\) scatta anche incollato a una
+  // parola, perché due caratteri uguali di fila a fine frase non sono mai
+  // normale punteggiatura; quello singolo (/ o \) invece scatta solo se
+  // isolato da uno spazio, per non confonderlo con uno slash qualunque
+  // dentro il testo (es. una frazione "1/2").
+  //
+  // Controllato sull'ULTIMO segmento prodotto da splitSegments (stessa
+  // funzione usata per spezzare il messaggio nei fumetti mostrati), non sul
+  // testo grezzo: i giocatori spesso chiudono il marcatore dentro lo stesso
+  // delimitatore «»/<>/ecc. usato per il parlato (es. "<\>"), quindi nel
+  // testo grezzo trimmato l'ultimo carattere è la parentesi di chiusura, non
+  // il marcatore — un controllo di fine-stringa sul testo intero lo avrebbe
+  // mancato. Deve stare PRIMA di parseBlock/parseTavernaMsgEl più sotto (non
+  // solo testualmente: sono `const`/`function` nello stesso scope top-level
+  // dell'IIFE, valutati in ordine — quelle funzioni vengono chiamate a
+  // caricamento script, prima ancora che venga dichiarato qualunque const
+  // più in basso nel file, quindi EXIT_MARKER_RE deve già esistere qui).
+  const EXIT_MARKER_RE = /(?:(?:^|\s)[\\/]|[\\/]{2})[.,;:!?]*$/;
+  function detectExitMarker(testo, invert) {
+    if (!testo) return false;
+    const segs = splitSegments(testo, invert);
+    if (!segs.length) return false;
+    return EXIT_MARKER_RE.test(segs[segs.length - 1].content);
+  }
+
   // Evidenzia il proprio nome PG quando compare nel testo di una battuta
   // altrui — stessa idea della sottolineatura che lot fa nativamente in
   // chat, per notare a colpo d'occhio chi ci ha citato. myPgName è risolto
@@ -727,6 +763,7 @@
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
       equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
+      exitMarker: detectExitMarker(testo, msgType === 'azione'),
     };
   }
 
@@ -1067,6 +1104,7 @@
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
       equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
+      exitMarker: detectExitMarker(testo, msgType === 'azione'),
     };
   }
 
@@ -1234,12 +1272,30 @@
 
   // Ultima posizione nota per PG: l'ultimo messaggio con un tag coordinata
   // valido, nell'ordine della chat — coerente con "cosa si vedrebbe aprendo
-  // la mappa alla fine di questa sessione di replay".
+  // la mappa alla fine di questa sessione di replay". Se l'ultimo messaggio
+  // di un PG in questo sottoinsieme porta il marcatore d'uscita (vedi
+  // detectExitMarker), due casi: è anche l'ultimo messaggio in assoluto del
+  // sottoinsieme → il PG resta (chi chiama marca il token come "in uscita",
+  // vedi pos[..].exiting); qualcun altro ha parlato dopo di lui → il PG è
+  // ormai uscito, tolto del tutto dalla mappa.
   function lastKnownPositions(messages) {
     const pos = {};
-    messages.forEach((m) => {
+    const lastMsgIndex = {};
+    messages.forEach((m, i) => {
+      if (!m.speaker) return;
       const c = parseCoord(m.coordRaw);
       if (c) pos[m.speaker] = c;
+      lastMsgIndex[m.speaker] = i;
+    });
+    const finalIndex = messages.length - 1;
+    Object.keys(lastMsgIndex).forEach((speaker) => {
+      const idx = lastMsgIndex[speaker];
+      if (!messages[idx].exitMarker) return;
+      if (idx === finalIndex) {
+        if (pos[speaker]) pos[speaker].exiting = true;
+      } else {
+        delete pos[speaker];
+      }
     });
     return pos;
   }
@@ -2210,10 +2266,18 @@
       placed.forEach(({ pg, pos, fanX: fx, fanY: fy }) => {
         const isActive = pg.nome === activeSpeaker;
 
+        // pos.exiting: ultima battuta di questo PG in questo luogo, marcata
+        // con uno dei separatori d'uscita convenzionali (vedi
+        // detectExitMarker) — nessuno ha ancora parlato dopo di lui in
+        // questo sottoinsieme, quindi il token resta ma in dissolvenza, a
+        // segnalare "sta per sparire dalla scena". Dal messaggio successivo
+        // in poi (chiunque sia a parlare) lastKnownPositions lo toglie del
+        // tutto da qui.
         const token = document.createElement('div');
         token.style.cssText = [
           'position:absolute', `left:${(pos.col + 0.5) * nativeCellW + (fx || 0)}px`, `top:${(pos.row + 0.5) * nativeCellH + (fy || 0)}px`,
           'width:0', 'height:0', `z-index:${isActive ? 9999 : (100 + pos.row)}`,
+          pos.exiting ? 'opacity:0.4;filter:grayscale(60%);' : '',
         ].join(';');
 
         // "frame" fa l'ancoraggio: -50% orizzontale sempre (centrato sulla

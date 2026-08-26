@@ -71,6 +71,7 @@ Chat **live**, uso principale:
 - Gestione di testo con `«»`/`<>`/ecc. annidati o spaiati (frequenti nelle formule di incantesimo) senza corrompere la suddivisione in fumetti
 - Il proprio nome PG viene evidenziato quando compare nelle battute altrui, come fa lot nativamente in chat — così si nota subito chi ci ha citato. Il nome viene letto una sola volta all'avvio da `b_all.asp` (stessa pagina della toolbar principale); se non riesce a determinarlo l'evidenziazione resta semplicemente disattivata, senza impatto sul resto
 - La vista non avanza più da sola quando arriva un nuovo messaggio (nemmeno se si stava leggendo quello che, nel frattempo, è appena diventato il penultimo): resta ferma sulla card aperta finché non si clicca la pillola "torna al live" (col conteggio dei nuovi messaggi arrivati nel frattempo) o non si risale a mano con ▶. Solo al primo caricamento della scena si parte dall'ultimo messaggio disponibile in quel momento
+- **Sperimentale, euristica non solida:** lot non ha un'azione esplicita per "togliere" un PG dalla griglia della mappa quando lascia il luogo — solo una convenzione informale fra giocatori, un separatore (`//`, `/`, `\\`, `\`) a fine dell'ultima battuta prima di uscire. Se lo riconosciamo, il modellino di quel PG resta visibile ma in dissolvenza sull'ultima azione, e sparisce del tutto dalle battute successive
 
 Replay di una chat salvata:
 
