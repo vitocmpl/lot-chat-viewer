@@ -69,6 +69,7 @@ Chat **live**, uso principale:
 - Messaggi azione (`+`) spezzati in fumetti azione/parlato come i normali, ma con i due significati scambiati (fuori parentesi è l'azione, dentro è il parlato) — bordo del fumetto evidenziato col colore reale con cui lot mostra quel messaggio (es. rosso per un master)
 - Messaggi di dichiarazione oggetti ("Certifica Possesso in Gioco") attribuiti correttamente al PG, mostrati come blocco unico
 - Gestione di testo con `«»`/`<>`/ecc. annidati o spaiati (frequenti nelle formule di incantesimo) senza corrompere la suddivisione in fumetti
+- Il proprio nome PG viene evidenziato quando compare nelle battute altrui, come fa lot nativamente in chat — così si nota subito chi ci ha citato. Il nome viene letto una sola volta all'avvio da `b_all.asp` (stessa pagina della toolbar principale); se non riesce a determinarlo l'evidenziazione resta semplicemente disattivata, senza impatto sul resto
 
 Replay di una chat salvata:
 

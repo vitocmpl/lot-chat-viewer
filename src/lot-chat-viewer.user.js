@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.88
+// @version      0.0.89
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -40,6 +40,35 @@
   // (sola lettura anche qui: si sostituisce solo l'area messaggi, mai
   // #chat-toolbar/#chat-input-bar).
   const isLive = !!document.getElementById('chat-messages');
+
+  // --- Identità propria: lot sottolinea il nome del proprio PG quando
+  // compare nelle battute altrui, per farlo notare a colpo d'occhio.
+  // b_all.asp è la pagina dei bottoni della toolbar principale, sempre
+  // disponibile per il giocatore loggato: contiene un link alla propria
+  // scheda già col nome PG dentro (NewLoc[2].src =
+  // ".../schedapg/scheda.asp?ID=NOMEPG&scheda="), quindi è l'unico posto
+  // trovato per risalire al proprio nome senza doverlo chiedere all'utente.
+  // Fetch same-origin, sola lettura, una volta sola per sessione di script.
+  // Se il fetch o il parsing falliscono (pagina cambiata, sessione strana,
+  // ecc.) myPgName resta null e la sola conseguenza è che l'evidenziazione
+  // delle citazioni non scatta — nessun'altra funzionalità dipende da
+  // questo, quindi degrada in sicurezza invece di rompere il resto.
+  let myPgName = null;
+  const myPgNamePromise = fetch('https://www.extremelot.eu/lotnew/b_all.asp', { credentials: 'same-origin' })
+    .then((res) => res.text())
+    .then((html) => {
+      const m = html.match(/schedapg[\\/]scheda\.asp\?ID=([^&"'\s]+)&scheda=/i);
+      return m ? decodeURIComponent(m[1]) : null;
+    })
+    .catch((err) => {
+      console.warn('[lot-chat-viewer] impossibile determinare il PG proprio da b_all.asp, evidenziazione citazioni disattivata:', err);
+      return null;
+    })
+    .then((nome) => {
+      myPgName = nome;
+      console.log('[lot-chat-viewer] PG proprio:', nome);
+      return nome;
+    });
 
   // Ricostruisce la scena da zero invece di limitarsi a un display:none/''.
   // Riprovato più volte a "patchare" un semplice mostra/nascondi (ricalcolo
@@ -448,6 +477,43 @@
     }
     flushOutside();
     return pages.length ? pages : [{ type: outsideType, content: text.trim() }];
+  }
+
+  // Evidenzia il proprio nome PG quando compare nel testo di una battuta
+  // altrui — stessa idea della sottolineatura che lot fa nativamente in
+  // chat, per notare a colpo d'occhio chi ci ha citato. myPgName è risolto
+  // una sola volta all'avvio (vedi fetch su b_all.asp più sopra); se non è
+  // stato possibile determinarlo resta null e qui si degrada a un semplice
+  // nodo di testo, nessuna evidenziazione. Confine di parola unicode-aware
+  // (non \b, che tratta lettere accentate come non-word) cosi' un nome PG
+  // dentro un'altra parola più lunga non scatta per errore.
+  function appendTextWithSelfMention(el, text, color) {
+    if (!myPgName || !text) {
+      el.appendChild(document.createTextNode(text));
+      return;
+    }
+    const escaped = myPgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(^|[^\\p{L}\\p{N}_])(' + escaped + ')(?=$|[^\\p{L}\\p{N}_])', 'giu');
+    let last = 0;
+    let found = false;
+    let m;
+    while ((m = re.exec(text))) {
+      found = true;
+      const start = m.index + m[1].length;
+      const end = start + m[2].length;
+      if (start > last) el.appendChild(document.createTextNode(text.slice(last, start)));
+      const mark = document.createElement('span');
+      mark.textContent = text.slice(start, end);
+      mark.style.cssText = `color:${color};font-weight:800;text-decoration:underline;text-underline-offset:2px;`;
+      el.appendChild(mark);
+      last = end;
+      re.lastIndex = end;
+    }
+    if (!found) {
+      el.appendChild(document.createTextNode(text));
+      return;
+    }
+    if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
   }
 
   // Un nick PG reale non contiene mai spazi/virgolette/parentesi angolari:
@@ -2317,11 +2383,11 @@
               icon.style.cssText = 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;';
               bubble.appendChild(icon);
             } else {
-              bubble.appendChild(document.createTextNode(run.value));
+              appendTextWithSelfMention(bubble, run.value, COLOR_GOLD);
             }
           });
         } else {
-          bubble.textContent = text;
+          appendTextWithSelfMention(bubble, text, COLOR_GOLD);
         }
         bubbles.appendChild(bubble);
         return bubbles;
@@ -2335,7 +2401,7 @@
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
-        bubble.textContent = p.content;
+        appendTextWithSelfMention(bubble, p.content, COLOR_GOLD);
         slot.appendChild(bubble);
         bubbles.appendChild(slot);
         return slot;
@@ -2689,6 +2755,7 @@
     Promise.all([
       Promise.all(roster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
       fetchMappa(),
+      myPgNamePromise,
     ])
       .then(([pgRecords, mappa]) => {
         console.log('[lot-chat-viewer] PG risolti (chat + fetch, merge applicato):', JSON.stringify(pgRecords, null, 2));
@@ -2732,6 +2799,7 @@
       Promise.all([
         Promise.all(liveRoster.map((nome) => fetchPGData(nome).then((fetched) => buildPGRecord(nome, chatDerivedRoster, fetched)))),
         liveMappa ? Promise.resolve(liveMappa) : fetchMappa(),
+        myPgNamePromise,
       ])
         .then(([pgRecords, mappa]) => {
           liveMappa = mappa;
