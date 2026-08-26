@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.92
+// @version      0.0.93
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -727,7 +727,7 @@
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
       equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
-      exitMarker: detectExitMarker(testo),
+      exitMarker: detectExitMarker(testo, msgType === 'azione'),
     };
   }
 
@@ -1068,7 +1068,7 @@
     return {
       time, speaker: speaker || fallbackSpeakerLabel(razzaIcon), razzaIcon, razzaLink, censoUrl, coordRaw, posLabel, tags, med, testo,
       equipRuns, unsupportedType, msgType, msgColor: msgStyle.color, msgBold: msgStyle.bold, diceRoll, diceMax,
-      exitMarker: detectExitMarker(testo),
+      exitMarker: detectExitMarker(testo, msgType === 'azione'),
     };
   }
 
@@ -1247,9 +1247,20 @@
   // scattare su un normale "/" di punteggiatura dentro una frase — resta
   // comunque un'approssimazione, da affinare quando si vedranno più casi
   // reali.
+  //
+  // Controllato sull'ULTIMO segmento prodotto da splitSegments (stessa
+  // funzione usata per spezzare il messaggio nei fumetti mostrati), non sul
+  // testo grezzo: i giocatori spesso chiudono il marcatore dentro lo stesso
+  // delimitatore «»/<>/ecc. usato per il parlato (es. "<\>"), quindi nel
+  // testo grezzo trimmato l'ultimo carattere è la parentesi di chiusura, non
+  // il marcatore — un controllo di fine-stringa sul testo intero lo avrebbe
+  // mancato.
   const EXIT_MARKER_RE = /(?:^|\s)(\/{1,2}|\\{1,2})$/;
-  function detectExitMarker(testo) {
-    return !!testo && EXIT_MARKER_RE.test(testo);
+  function detectExitMarker(testo, invert) {
+    if (!testo) return false;
+    const segs = splitSegments(testo, invert);
+    if (!segs.length) return false;
+    return EXIT_MARKER_RE.test(segs[segs.length - 1].content);
   }
 
   // Ultima posizione nota per PG: l'ultimo messaggio con un tag coordinata
