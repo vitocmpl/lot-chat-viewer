@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.95
+// @version      0.0.97
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -386,7 +386,17 @@
   // un'identità visiva riconoscibile invece del solito placeholder
   // "iniziale del nome": va nel campo censoUrl del messaggio, così
   // fillAvatar() la mostra esattamente come farebbe con uno stemma vero.
-  const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/THEring40x30.gif';
+  const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/stemmi/12010.gif';
+
+  // Fato Estemporaneo: variante del Fato generata dal motore AI di lot
+  // invece che scritta a mano dal master, riconoscibile nel markup da
+  // un <img alt="AI" src=".../ai.png"> dentro lo stesso box (vedi
+  // msg-fato-box/fatoTd più sotto) — non un tipo di messaggio a sé,
+  // stesso msgType 'fato' e stessa icona base (FATO_ICON_URL), solo con
+  // questa seconda icona AI sovrapposta e sfasata (vedi aiOverlay in
+  // fillAvatar) per distinguerlo a colpo d'occhio da un intervento
+  // diretto del master.
+  const AI_FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/ai.png';
 
   // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
   // (msg-dado, ma il parlante si legge già dal solito link icona razza,
@@ -806,8 +816,10 @@
         flushCurrent();
         const testo = decodeEntitiesOnce(fatoTd.textContent).replace(/\s+/g, ' ').trim();
         if (testo) {
+          const isEstemporaneo = !!fatoTd.querySelector('img[src*="ai.png"]');
           messages.push({
-            time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+            time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
+            censoUrl: FATO_ICON_URL, aiOverlay: isEstemporaneo,
             coordRaw: null, posLabel: null, tags: [], med: null, testo,
             equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
             msgColor: null, msgBold: false,
@@ -931,8 +943,14 @@
     if (fatoBox) {
       const testo = decodeEntitiesOnce(fatoBox.textContent).replace(/\s+/g, ' ').trim();
       if (!testo) return null;
+      // Fato Estemporaneo: stesso box, ma con l'<img alt="AI"> del motore AI
+      // dentro (vedi AI_FATO_ICON_URL) — speaker e icona dedicati, il resto
+      // (bordo COLOR_FATO, split azione/parlato, esclusione dal roster) resta
+      // identico al Fato scritto dal master.
+      const isEstemporaneo = !!fatoBox.querySelector('img[src*="ai.png"]');
       return {
-        time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+        time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
+        censoUrl: FATO_ICON_URL, aiOverlay: isEstemporaneo,
         coordRaw: null, posLabel: null, tags: [], med: null, testo,
         equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
         msgColor: null, msgBold: false,
@@ -1345,12 +1363,25 @@
     el.innerHTML = '';
     if (pg.censoUrl) {
       el.style.background = 'transparent';
+      el.style.position = 'relative';
       const img = document.createElement('img');
       img.src = pg.censoUrl;
       img.alt = '';
       img.draggable = false;
       img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
       el.appendChild(img);
+      // Fato Estemporaneo: l'icona AI si sovrappone all'anello, sfasata in
+      // basso a destra, invece di sostituirlo — così resta leggibile che è
+      // pur sempre un Fato (stessa icona base di quello scritto dal
+      // master), solo con la "firma" dell'AI aggiunta sopra.
+      if (pg.aiOverlay) {
+        const overlay = document.createElement('img');
+        overlay.src = AI_FATO_ICON_URL;
+        overlay.alt = '';
+        overlay.draggable = false;
+        overlay.style.cssText = 'position:absolute;right:-22%;bottom:-22%;width:62%;height:62%;object-fit:contain;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000);';
+        el.appendChild(overlay);
+      }
     } else if (pg.iconUrl) {
       el.style.background = pgAccentColor(pg.nome);
       const img = document.createElement('img');
@@ -2724,15 +2755,27 @@
 
     // Riga compatta nello stream: click apre esattamente questo messaggio.
     function buildCompactCard(pg, msg, idx) {
+      // Fato (normale ed Estemporaneo) e Immagine: nessun PG dietro, è il
+      // mondo di gioco stesso a parlare/mostrare qualcosa — nella timeline
+      // compressa devono spiccare rispetto alle righe di dialogo normali
+      // invece di confondersi in mezzo, un bordo/glow dorato dedicato
+      // (stesso COLOR_GOLD già usato per dado/skill) invece del bordo
+      // neutro di default. Da aperti restano invariati (buildExpandedCard
+      // non tocca il bordo della card).
+      const isFatoRow = msg.msgType === 'fato';
+      const isImmagineRow = msg.msgType === 'immagine';
+      const isSystemRow = isFatoRow || isImmagineRow;
       const row = document.createElement('button');
       row.type = 'button';
       row.style.cssText = [
         'appearance:none', 'display:flex', 'align-items:center', 'gap:8px', 'text-align:left', 'width:100%',
-        'padding:7px 9px', 'border-radius:10px', `background:${COLOR_SURFACE2}`, `border:1px solid ${COLOR_LINE}`,
+        'padding:7px 9px', 'border-radius:10px', `background:${COLOR_SURFACE2}`,
+        `border:${isSystemRow ? '1.5px' : '1px'} solid ${isSystemRow ? COLOR_GOLD : COLOR_LINE}`,
+        isSystemRow ? 'box-shadow:0 0 7px rgba(217,184,106,0.3);' : '',
         'cursor:pointer', 'color:inherit', 'font:inherit',
       ].join(';');
-      row.addEventListener('mouseenter', () => { row.style.borderColor = COLOR_EMBER_DIM; });
-      row.addEventListener('mouseleave', () => { row.style.borderColor = COLOR_LINE; });
+      row.addEventListener('mouseenter', () => { row.style.borderColor = isSystemRow ? COLOR_GOLD : COLOR_EMBER_DIM; });
+      row.addEventListener('mouseleave', () => { row.style.borderColor = isSystemRow ? COLOR_GOLD : COLOR_LINE; });
 
       const avatar = document.createElement('div');
       // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
@@ -2750,7 +2793,7 @@
       const isWhisperPreview = msg.msgType === 'sussurro';
       const isDicePreview = msg.msgType === 'dado';
       const isSkillPreview = msg.msgType === 'skill';
-      const isImmaginePreview = msg.msgType === 'immagine';
+      const isImmaginePreview = isImmagineRow;
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
       // Fato: niente prefisso "Fato: " né colore/peso dedicati — il nome
@@ -2793,7 +2836,7 @@
         // meglio una card degradata che farla sparire dalla timeline.
         const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
           nome: msg.speaker, razza: null, sesso: null, censoUrl: msg.censoUrl || null, ritrattoUrl: null, aspetto: null,
-          iconUrl: msg.razzaIcon || null,
+          iconUrl: msg.razzaIcon || null, aiOverlay: msg.aiOverlay || false,
         };
         sidebarList.appendChild(
           i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
