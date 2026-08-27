@@ -386,14 +386,16 @@
   // un'identità visiva riconoscibile invece del solito placeholder
   // "iniziale del nome": va nel campo censoUrl del messaggio, così
   // fillAvatar() la mostra esattamente come farebbe con uno stemma vero.
-  const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/THEring40x30.gif';
+  const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/stemmi/12010.gif';
 
   // Fato Estemporaneo: variante del Fato generata dal motore AI di lot
   // invece che scritta a mano dal master, riconoscibile nel markup da
   // un <img alt="AI" src=".../ai.png"> dentro lo stesso box (vedi
   // msg-fato-box/fatoTd più sotto) — non un tipo di messaggio a sé,
-  // stesso msgType 'fato', solo speaker e icona diversi per distinguerlo
-  // a colpo d'occhio da un intervento diretto del master.
+  // stesso msgType 'fato' e stessa icona base (FATO_ICON_URL), solo con
+  // questa seconda icona AI sovrapposta e sfasata (vedi aiOverlay in
+  // fillAvatar) per distinguerlo a colpo d'occhio da un intervento
+  // diretto del master.
   const AI_FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/ai.png';
 
   // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
@@ -817,7 +819,7 @@
           const isEstemporaneo = !!fatoTd.querySelector('img[src*="ai.png"]');
           messages.push({
             time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
-            censoUrl: isEstemporaneo ? AI_FATO_ICON_URL : FATO_ICON_URL,
+            censoUrl: FATO_ICON_URL, aiOverlay: isEstemporaneo,
             coordRaw: null, posLabel: null, tags: [], med: null, testo,
             equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
             msgColor: null, msgBold: false,
@@ -948,7 +950,7 @@
       const isEstemporaneo = !!fatoBox.querySelector('img[src*="ai.png"]');
       return {
         time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
-        censoUrl: isEstemporaneo ? AI_FATO_ICON_URL : FATO_ICON_URL,
+        censoUrl: FATO_ICON_URL, aiOverlay: isEstemporaneo,
         coordRaw: null, posLabel: null, tags: [], med: null, testo,
         equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
         msgColor: null, msgBold: false,
@@ -1361,12 +1363,25 @@
     el.innerHTML = '';
     if (pg.censoUrl) {
       el.style.background = 'transparent';
+      el.style.position = 'relative';
       const img = document.createElement('img');
       img.src = pg.censoUrl;
       img.alt = '';
       img.draggable = false;
       img.style.cssText = `width:100%;height:100%;object-fit:contain;filter:${STEMMA_FILTER};`;
       el.appendChild(img);
+      // Fato Estemporaneo: l'icona AI si sovrappone all'anello, sfasata in
+      // basso a destra, invece di sostituirlo — così resta leggibile che è
+      // pur sempre un Fato (stessa icona base di quello scritto dal
+      // master), solo con la "firma" dell'AI aggiunta sopra.
+      if (pg.aiOverlay) {
+        const overlay = document.createElement('img');
+        overlay.src = AI_FATO_ICON_URL;
+        overlay.alt = '';
+        overlay.draggable = false;
+        overlay.style.cssText = 'position:absolute;right:-22%;bottom:-22%;width:62%;height:62%;object-fit:contain;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000);';
+        el.appendChild(overlay);
+      }
     } else if (pg.iconUrl) {
       el.style.background = pgAccentColor(pg.nome);
       const img = document.createElement('img');
@@ -2809,7 +2824,7 @@
         // meglio una card degradata che farla sparire dalla timeline.
         const pg = pgRecords.find((p) => p.nome === msg.speaker) || {
           nome: msg.speaker, razza: null, sesso: null, censoUrl: msg.censoUrl || null, ritrattoUrl: null, aspetto: null,
-          iconUrl: msg.razzaIcon || null,
+          iconUrl: msg.razzaIcon || null, aiOverlay: msg.aiOverlay || false,
         };
         sidebarList.appendChild(
           i === index ? buildExpandedCard(pg, msg, positionsNow[msg.speaker]) : buildCompactCard(pg, msg, i)
