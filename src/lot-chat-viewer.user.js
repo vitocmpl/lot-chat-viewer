@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.97
+// @version      0.0.98
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -26,6 +26,10 @@
     @keyframes lotChatViewerArrowBounce {
       0%, 100% { transform: translateX(-50%) translateY(0); }
       50% { transform: translateX(-50%) translateY(4px); }
+    }
+    @keyframes lotChatViewerGhostPulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 0.9; }
     }
   `;
   document.head.appendChild(arrowStyle);
@@ -2125,6 +2129,38 @@
       return icon;
     }
 
+    // Placeholder per un modellino intero senza aspetto ricostruibile:
+    // niente scheda dietro (unsupportedType, es. un drago in mutaforma) o
+    // niente PG affatto (un token piazzato dal Fato sulla mappa-quest, mai
+    // passato da una scheda). Invece di lasciare lo sprite vuoto (solo
+    // ombra + nome, corpo invisibile), una sagoma/sudario stilizzato e
+    // semitrasparente — coerente col fatto che "non è un vero corpo",
+    // pulsa piano (lotChatViewerGhostPulse, iniettata in cima allo script)
+    // per leggersi subito come presenza fantasma, non un bug di rendering.
+    function appendGhostPlaceholder(sprite) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 23 41');
+      svg.style.cssText = [
+        'position:absolute', 'inset:0', 'width:100%', 'height:100%',
+        'filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6))',
+        'animation:lotChatViewerGhostPulse 2.6s ease-in-out infinite',
+      ].join(';');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute(
+        'd',
+        'M11.5,2 C15,2 17.5,5.5 17.5,10 C17.5,13 16,14.5 16,14.5 C18,20 19,28 18.5,35 '
+        + 'C17,33 15.5,37 14,34 C12.5,38 10.5,34 9,38 C7.5,34 6,33 4.5,35 '
+        + 'C4,28 5,20 7,14.5 C7,14.5 5.5,13 5.5,10 C5.5,5.5 8,2 11.5,2 Z'
+      );
+      path.setAttribute('fill', COLOR_GOLD);
+      path.setAttribute('fill-opacity', '0.3');
+      path.setAttribute('stroke', COLOR_GOLD);
+      path.setAttribute('stroke-width', '1');
+      path.setAttribute('stroke-opacity', '0.8');
+      svg.appendChild(path);
+      sprite.appendChild(svg);
+    }
+
     // Modellino intero: layer sovrapposti (corpo, vestito, eventuali
     // accessori — pg.aspetto.layers è già nell'ordine di stacking corretto),
     // ombra ellittica ai piedi, nome sotto ancorato al fondo dello sprite.
@@ -2138,19 +2174,24 @@
       // parlando — sul token compatto è già dentro un riquadro bordato di
       // suo, il glow lì sarebbe ridondante (vedi la cella evidenziata).
       if (isActive) sprite.style.filter = `drop-shadow(0 0 5px ${pgAccentColor(pg.nome)})`;
-      ((pg.aspetto && pg.aspetto.layers) || []).forEach((url) => {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = '';
-        img.draggable = false;
-        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
-        // Alcuni layer (accessori tipo "manette") su lot puntano a
-        // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
-        // si vede nulla), ma senza questa gestione qui compare l'icona di
-        // immagine non trovata del browser sopra il modellino.
-        img.addEventListener('error', () => img.remove());
-        sprite.appendChild(img);
-      });
+      const layers = (pg.aspetto && pg.aspetto.layers) || [];
+      if (layers.length) {
+        layers.forEach((url) => {
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+          // Alcuni layer (accessori tipo "manette") su lot puntano a
+          // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
+          // si vede nulla), ma senza questa gestione qui compare l'icona di
+          // immagine non trovata del browser sopra il modellino.
+          img.addEventListener('error', () => img.remove());
+          sprite.appendChild(img);
+        });
+      } else {
+        appendGhostPlaceholder(sprite);
+      }
       const shadow = document.createElement('div');
       shadow.style.cssText = [
         'position:absolute', 'bottom:-2px', 'left:50%', 'transform:translateX(-50%)',
