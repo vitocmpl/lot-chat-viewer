@@ -388,6 +388,14 @@
   // fillAvatar() la mostra esattamente come farebbe con uno stemma vero.
   const FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/THEring40x30.gif';
 
+  // Fato Estemporaneo: variante del Fato generata dal motore AI di lot
+  // invece che scritta a mano dal master, riconoscibile nel markup da
+  // un <img alt="AI" src=".../ai.png"> dentro lo stesso box (vedi
+  // msg-fato-box/fatoTd più sotto) — non un tipo di messaggio a sé,
+  // stesso msgType 'fato', solo speaker e icona diversi per distinguerlo
+  // a colpo d'occhio da un intervento diretto del master.
+  const AI_FATO_ICON_URL = 'https://www.extremelot.eu/lotnew/img/ai.png';
+
   // Riconosce un tiro di dadi dal testo generato da lot, uguale sia in live
   // (msg-dado, ma il parlante si legge già dal solito link icona razza,
   // niente bisogno di un branch dedicato come per il sussurro) sia in
@@ -806,8 +814,10 @@
         flushCurrent();
         const testo = decodeEntitiesOnce(fatoTd.textContent).replace(/\s+/g, ' ').trim();
         if (testo) {
+          const isEstemporaneo = !!fatoTd.querySelector('img[src*="ai.png"]');
           messages.push({
-            time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+            time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
+            censoUrl: isEstemporaneo ? AI_FATO_ICON_URL : FATO_ICON_URL,
             coordRaw: null, posLabel: null, tags: [], med: null, testo,
             equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
             msgColor: null, msgBold: false,
@@ -931,8 +941,14 @@
     if (fatoBox) {
       const testo = decodeEntitiesOnce(fatoBox.textContent).replace(/\s+/g, ' ').trim();
       if (!testo) return null;
+      // Fato Estemporaneo: stesso box, ma con l'<img alt="AI"> del motore AI
+      // dentro (vedi AI_FATO_ICON_URL) — speaker e icona dedicati, il resto
+      // (bordo COLOR_FATO, split azione/parlato, esclusione dal roster) resta
+      // identico al Fato scritto dal master.
+      const isEstemporaneo = !!fatoBox.querySelector('img[src*="ai.png"]');
       return {
-        time: null, speaker: 'Fato', razzaIcon: null, razzaLink: null, censoUrl: FATO_ICON_URL,
+        time: null, speaker: isEstemporaneo ? 'Fato Estemporaneo' : 'Fato', razzaIcon: null, razzaLink: null,
+        censoUrl: isEstemporaneo ? AI_FATO_ICON_URL : FATO_ICON_URL,
         coordRaw: null, posLabel: null, tags: [], med: null, testo,
         equipRuns: null, unsupportedType: false, msgType: 'fato', imageUrl: null,
         msgColor: null, msgBold: false,
