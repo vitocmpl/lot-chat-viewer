@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.98
+// @version      0.0.99
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1279,6 +1279,32 @@
       });
   }
 
+  // Token piazzati dal Fato su chat_mappa_quest.asp (mai passati da un
+  // messaggio in chat, quindi invisibili al parser testuale): l'endpoint
+  // JSON che il client reale di lot interroga per disegnare quei
+  // segnalini (#mapIcons è vuoto nel markup statico, popolato da
+  // MappaQuest.loadPositions() via questa stessa chiamata — vedi il
+  // sorgente della pagina). col/row sono già indici di griglia (stessa
+  // base 0 di parseCoord/lastKnownPositions), niente conversione pixel.
+  // Solo tipo 'PNG' (i token del Fato) — i 'PG' restano quelli derivati
+  // dalla chat, per non far litigare due fonti sulla stessa coordinata
+  // (vedi discussione: qui usiamo la pagina live solo per ciò che la chat
+  // non può mai sapere). Nessuna dipendenza rigida: se la chiamata fallisce
+  // (rete, sessione, luogo senza mappa-quest) si degrada a "nessun token
+  // del Fato", non un errore bloccante.
+  const MAPPA_ICONS_API_URL = 'https://www.extremelot.eu/proc/chat/api/chat_mappa_quest.asp?action=load';
+  function fetchMappaIcons() {
+    return fetch(MAPPA_ICONS_API_URL, { credentials: 'same-origin' })
+      .then((res) => res.json())
+      .then((data) => (data && data.success && Array.isArray(data.positions))
+        ? data.positions.filter((p) => p.tipo === 'PNG')
+        : [])
+      .catch((err) => {
+        console.warn('[lot-chat-viewer] token del Fato non disponibili:', err);
+        return [];
+      });
+  }
+
   // --- Rendering: mappa + token, coordinate di griglia -----------------
   function colIndexFromLetters(letters) {
     if (letters.length === 1) return letters.charCodeAt(0) - 65;
@@ -1463,9 +1489,17 @@
       index = nav.index >= 0 ? Math.min(nav.index, chatParsed.messages.length - 1) : chatParsed.messages.length - 1;
       nav.index = index;
     }
+    // Token del Fato (PNG piazzati su chat_mappa_quest.asp, mai passati da
+    // un messaggio in chat): letti solo in live, solo ai tre momenti in cui
+    // "si è sull'ultimo messaggio" (vedi opts.onReachLive più sotto e
+    // resolveAndRenderLive fuori da qui) — mai un polling proprio. In
+    // replay quella pagina non esiste per quella sessione passata, niente
+    // da leggere: fatoTokens resta vuoto per design.
+    const fatoTokens = (mode === 'live' && opts.fatoTokens) || [];
     function setIndex(i) {
       index = i;
       if (nav) nav.index = index;
+      if (mode === 'live' && opts.onReachLive && index === chatParsed.messages.length - 1) opts.onReachLive();
       draw();
     }
 
@@ -2093,26 +2127,45 @@
       icon.style.cssText = 'display:flex;align-items:center;justify-content:center;width:46px;position:relative;';
 
       const iconBadge = document.createElement('div');
-      iconBadge.style.cssText = [
-        // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
-        // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
-        // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
-        // (stesso border-radius) per restare pulita senza contenitore.
-        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
-        'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
-        'display:flex', 'align-items:center', 'justify-content:center',
-        'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
-        'transform:scale(var(--token-icon-scale,1))',
-      ].join(';');
-      if (pg.censoUrl) {
+      // Token del Fato (PNG piazzati su chat_mappa_quest.asp): stesso stile
+      // esatto usato da lot per quei segnalini — cerchio colorato invece del
+      // quadrato stemma, anello 12010 dentro invece dell'immagine del PG
+      // (non ne hanno una vera). Il quadrato bordato resta per ogni PG.
+      if (pg.isFatoNpc) {
+        iconBadge.style.cssText = [
+          'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:50%', 'flex:0 0 auto',
+          `background:${pg.npcColor || '#555555'}`, 'border:2px solid #F8E9AA', 'box-shadow:0 0 6px rgba(248,233,170,0.5)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'transform:scale(var(--token-icon-scale,1))',
+        ].join(';');
         const img = document.createElement('img');
-        img.src = pg.censoUrl;
+        img.src = FATO_ICON_URL;
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
+        img.style.cssText = `width:${Math.floor(iconSize * 0.72)}px;height:${Math.floor(iconSize * 0.72)}px;object-fit:contain;`;
         iconBadge.appendChild(img);
       } else {
-        iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
+        iconBadge.style.cssText = [
+          // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
+          // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
+          // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
+          // (stesso border-radius) per restare pulita senza contenitore.
+          'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
+          'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
+          'transform:scale(var(--token-icon-scale,1))',
+        ].join(';');
+        if (pg.censoUrl) {
+          const img = document.createElement('img');
+          img.src = pg.censoUrl;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
+          iconBadge.appendChild(img);
+        } else {
+          iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
+        }
       }
 
       const iconLabel = document.createElement('div');
@@ -2120,7 +2173,7 @@
       iconLabel.style.cssText = [
         'position:absolute', 'top:100%', 'left:50%', 'margin-top:1px',
         'transform:translateX(-50%) scale(var(--icon-label-scale,1))', 'transform-origin:top center',
-        'font-family:Verdana,sans-serif', 'font-size:9px', 'color:#F8E9AA',
+        'font-family:Verdana,sans-serif', 'font-size:9px', `font-style:${pg.isFatoNpc ? 'italic' : 'normal'}`, 'color:#F8E9AA',
         'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
       ].join(';');
 
@@ -2232,6 +2285,16 @@
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
       const positions = lastKnownPositions(messages);
+      // Token del Fato: posizione iniettata direttamente (col/row già
+      // pronti dall'API di chat_mappa_quest.asp, nessun tag coordinata da
+      // interpretare), pg sintetico senza scheda — fillAvatar/buildFullSprite
+      // già sanno mostrare il fantasma quando pg.aspetto è assente.
+      fatoTokens.forEach((t) => { positions[t.nick] = { col: t.col, row: t.row }; });
+      const fatoPgRecords = fatoTokens.map((t) => ({
+        nome: t.nick, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+        aiOverlay: false, isFatoNpc: true, npcColor: t.colore || '#555555',
+      }));
+      const allPgRecords = pgRecords.concat(fatoPgRecords);
       const stackOrder = buildStackOrder(messages);
       const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
 
@@ -2253,7 +2316,7 @@
       refreshIdleCoord();
 
       const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
-      const placed = pgRecords
+      const placed = allPgRecords
         .map((pg) => ({ pg, pos: positions[pg.nome] }))
         .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
 
@@ -2989,6 +3052,24 @@
     const liveNav = { index: -1 };
     let liveMappa = null;
     let liveDebounce = null;
+    // Token del Fato: sopravvivono al rebuild come liveMappa/liveNav (stesso
+    // motivo — passati per riferimento a ogni renderTimeline). Aggiornati
+    // solo ai tre momenti concordati (vedi refreshFatoTokens): mai un
+    // polling proprio, si appoggiano sempre al rebuild "pieno" già in uso
+    // per tutto il resto.
+    let liveFatoTokens = [];
+
+    // Richiamata: (1) subito dopo ogni resolveAndRenderLive (copre sia il
+    // primo render sia ogni nuovo messaggio, via il debounce sotto), (2)
+    // da setIndex quando si atterra sull'ultimo messaggio (click su una
+    // card, pillola "torna al live") — non un polling a intervallo, solo
+    // questi eventi. fetchMappaIcons() degrada da sé a [] se fallisce.
+    function refreshFatoTokens() {
+      fetchMappaIcons().then((tokens) => {
+        liveFatoTokens = tokens;
+        if (sceneVisible && rebuildScene) rebuildScene();
+      });
+    }
 
     function resolveAndRenderLive() {
       const parsed = parseChatTaverna(liveContainer);
@@ -3014,12 +3095,20 @@
           // versione ferma all'ultimo momento in cui era visibile, perdendo
           // tutti i messaggi arrivati nel frattempo. Si evita solo di
           // toccare il DOM adesso se non è comunque visibile.
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav });
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, {
+            mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav,
+            fatoTokens: liveFatoTokens, onReachLive: refreshFatoTokens,
+          });
           if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
           console.error('[lot-chat-viewer] errore nella risoluzione scena live:', err);
         });
+      // Ogni rebuild "pieno" (primo render, o un nuovo messaggio arrivato)
+      // è anche uno dei tre momenti concordati per rileggere i token del
+      // Fato — fuori dal .then sopra: non deve aspettare la risoluzione di
+      // pgRecords/mappa, sono fetch indipendenti.
+      refreshFatoTokens();
     }
 
     resolveAndRenderLive();
