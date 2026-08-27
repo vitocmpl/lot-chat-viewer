@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.96
+// @version      0.0.97
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2755,15 +2755,27 @@
 
     // Riga compatta nello stream: click apre esattamente questo messaggio.
     function buildCompactCard(pg, msg, idx) {
+      // Fato (normale ed Estemporaneo) e Immagine: nessun PG dietro, è il
+      // mondo di gioco stesso a parlare/mostrare qualcosa — nella timeline
+      // compressa devono spiccare rispetto alle righe di dialogo normali
+      // invece di confondersi in mezzo, un bordo/glow dorato dedicato
+      // (stesso COLOR_GOLD già usato per dado/skill) invece del bordo
+      // neutro di default. Da aperti restano invariati (buildExpandedCard
+      // non tocca il bordo della card).
+      const isFatoRow = msg.msgType === 'fato';
+      const isImmagineRow = msg.msgType === 'immagine';
+      const isSystemRow = isFatoRow || isImmagineRow;
       const row = document.createElement('button');
       row.type = 'button';
       row.style.cssText = [
         'appearance:none', 'display:flex', 'align-items:center', 'gap:8px', 'text-align:left', 'width:100%',
-        'padding:7px 9px', 'border-radius:10px', `background:${COLOR_SURFACE2}`, `border:1px solid ${COLOR_LINE}`,
+        'padding:7px 9px', 'border-radius:10px', `background:${COLOR_SURFACE2}`,
+        `border:${isSystemRow ? '1.5px' : '1px'} solid ${isSystemRow ? COLOR_GOLD : COLOR_LINE}`,
+        isSystemRow ? 'box-shadow:0 0 7px rgba(217,184,106,0.3);' : '',
         'cursor:pointer', 'color:inherit', 'font:inherit',
       ].join(';');
-      row.addEventListener('mouseenter', () => { row.style.borderColor = COLOR_EMBER_DIM; });
-      row.addEventListener('mouseleave', () => { row.style.borderColor = COLOR_LINE; });
+      row.addEventListener('mouseenter', () => { row.style.borderColor = isSystemRow ? COLOR_GOLD : COLOR_EMBER_DIM; });
+      row.addEventListener('mouseleave', () => { row.style.borderColor = isSystemRow ? COLOR_GOLD : COLOR_LINE; });
 
       const avatar = document.createElement('div');
       // Niente overflow:hidden: clipperebbe il drop-shadow dello stemma
@@ -2781,7 +2793,7 @@
       const isWhisperPreview = msg.msgType === 'sussurro';
       const isDicePreview = msg.msgType === 'dado';
       const isSkillPreview = msg.msgType === 'skill';
-      const isImmaginePreview = msg.msgType === 'immagine';
+      const isImmaginePreview = isImmagineRow;
       const pv = document.createElement('div');
       const preview = splitSegments(msg.testo).map((p) => p.content).join(' ');
       // Fato: niente prefisso "Fato: " né colore/peso dedicati — il nome
