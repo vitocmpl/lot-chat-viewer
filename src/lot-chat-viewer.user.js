@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.5
+// @version      0.2.6
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2362,17 +2362,20 @@
 
       if (pg.modelloUrl) {
         // Modellino custom dal Baule dei Ricordi: immagine unica (non uno
-        // stack di layer da allineare pixel-per-pixel), quindi qui
-        // "contain" è corretto invece di "fill" — preserva le proporzioni
-        // naturali invece di stretchare. Accettata solo se il rapporto
-        // altezza/larghezza è vicino a quello del modellino standard
-        // (873x501, h/w 1.74, tolleranza ±30%): oltre quella soglia il
-        // fit-to-height risulterebbe troppo stretto/largo rispetto agli
-        // altri PG sulla mappa, meglio il fallback allo stack noto.
+        // stack di layer da allineare pixel-per-pixel tra loro), quindi qui
+        // si scala per altezza invece che per larghezza come i layer
+        // standard — height:100% + width:auto preserva le proporzioni
+        // naturali senza stretch, ancorata al fondo (bottom:0, piedi a
+        // contatto con l'ombra) e centrata in larghezza; se il rapporto
+        // dell'immagine è più "largo" del box, sconfina leggermente ai
+        // lati invece di rimpicciolire tutto il personaggio — accettabile
+        // perché il check dei ±30% a monte tiene lo sconfinamento limitato.
+        // Accettata solo se il rapporto altezza/larghezza è vicino a quello
+        // del modellino standard (873x501, h/w 1.74, tolleranza ±30%).
         const img = document.createElement('img');
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:bottom center;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));visibility:hidden;';
+        img.style.cssText = 'position:absolute;bottom:0;left:50%;transform:translateX(-50%);height:100%;width:auto;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));visibility:hidden;';
         img.addEventListener('load', () => {
           const ratio = img.naturalHeight / img.naturalWidth;
           const ref = 873 / 501;
