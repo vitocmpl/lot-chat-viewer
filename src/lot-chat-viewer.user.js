@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.97
+// @version      0.1.4
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -27,8 +27,24 @@
       0%, 100% { transform: translateX(-50%) translateY(0); }
       50% { transform: translateX(-50%) translateY(4px); }
     }
+    @keyframes lotChatViewerGhostPulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 0.9; }
+    }
   `;
   document.head.appendChild(arrowStyle);
+
+  // Sfocatura del fantasma (vedi appendGhostPlaceholder): un filtro SVG non
+  // è esprimibile via style inline, serve un elemento <filter> vero in un
+  // <svg> nel DOM — iniettato una sola volta qui, invisibile di suo
+  // (width/height 0), referenziato altrove con filter:url(#id).
+  const ghostFilterSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  ghostFilterSvg.setAttribute('width', '0');
+  ghostFilterSvg.setAttribute('height', '0');
+  ghostFilterSvg.style.cssText = 'position:absolute;';
+  ghostFilterSvg.innerHTML = '<defs><filter id="lotChatViewerGhostBlur" x="-60%" y="-60%" width="220%" height="220%">'
+    + '<feGaussianBlur stdDeviation="1.1"/></filter></defs>';
+  document.body.appendChild(ghostFilterSvg);
 
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
@@ -1275,6 +1291,32 @@
       });
   }
 
+  // Token piazzati dal Fato su chat_mappa_quest.asp (mai passati da un
+  // messaggio in chat, quindi invisibili al parser testuale): l'endpoint
+  // JSON che il client reale di lot interroga per disegnare quei
+  // segnalini (#mapIcons è vuoto nel markup statico, popolato da
+  // MappaQuest.loadPositions() via questa stessa chiamata — vedi il
+  // sorgente della pagina). col/row sono già indici di griglia (stessa
+  // base 0 di parseCoord/lastKnownPositions), niente conversione pixel.
+  // Solo tipo 'PNG' (i token del Fato) — i 'PG' restano quelli derivati
+  // dalla chat, per non far litigare due fonti sulla stessa coordinata
+  // (vedi discussione: qui usiamo la pagina live solo per ciò che la chat
+  // non può mai sapere). Nessuna dipendenza rigida: se la chiamata fallisce
+  // (rete, sessione, luogo senza mappa-quest) si degrada a "nessun token
+  // del Fato", non un errore bloccante.
+  const MAPPA_ICONS_API_URL = 'https://www.extremelot.eu/proc/chat/api/chat_mappa_quest.asp?action=load';
+  function fetchMappaIcons() {
+    return fetch(MAPPA_ICONS_API_URL, { credentials: 'same-origin' })
+      .then((res) => res.json())
+      .then((data) => (data && data.success && Array.isArray(data.positions))
+        ? data.positions.filter((p) => p.tipo === 'PNG')
+        : [])
+      .catch((err) => {
+        console.warn('[lot-chat-viewer] token del Fato non disponibili:', err);
+        return [];
+      });
+  }
+
   // --- Rendering: mappa + token, coordinate di griglia -----------------
   function colIndexFromLetters(letters) {
     if (letters.length === 1) return letters.charCodeAt(0) - 65;
@@ -1429,6 +1471,12 @@
     // senza il riquadro mappa/griglia/token (vedi hasMap più sotto) — solo
     // testo/fumetti con la nostra grafica, come per il resto della chat.
     const hasMap = !!mappa.mapUrl;
+    // pgRecords "arricchito" con i fallback per parlanti non risolti ma con
+    // posizione+icona note (vedi draw() più sotto, unresolvedPgRecords) —
+    // ricalcolato ad ogni draw(), letto anche dal ricalcolo tokens on-zoom
+    // qui sotto, altrimenti quei token sparirebbero di nuovo al primo
+    // attraversamento della soglia compatto/modellino.
+    let tokenPgRecords = pgRecords;
     const existing = document.getElementById('lot-chat-viewer-scene');
     if (existing) existing.remove();
     if (!chatParsed.messages.length) {
@@ -1459,9 +1507,17 @@
       index = nav.index >= 0 ? Math.min(nav.index, chatParsed.messages.length - 1) : chatParsed.messages.length - 1;
       nav.index = index;
     }
+    // Token del Fato (PNG piazzati su chat_mappa_quest.asp, mai passati da
+    // un messaggio in chat): letti solo in live, solo ai tre momenti in cui
+    // "si è sull'ultimo messaggio" (vedi opts.onReachLive più sotto e
+    // resolveAndRenderLive fuori da qui) — mai un polling proprio. In
+    // replay quella pagina non esiste per quella sessione passata, niente
+    // da leggere: fatoTokens resta vuoto per design.
+    const fatoTokens = (mode === 'live' && opts.fatoTokens) || [];
     function setIndex(i) {
       index = i;
       if (nav) nav.index = index;
+      if (mode === 'live' && opts.onReachLive && index === chatParsed.messages.length - 1) opts.onReachLive();
       draw();
     }
 
@@ -1945,7 +2001,7 @@
       if (compact !== lastCompact) {
         lastCompact = compact;
         if (typeof updateTokens === 'function') {
-          updateTokens(chatParsed.messages.slice(0, index + 1), pgRecords, { recenter: false });
+          updateTokens(chatParsed.messages.slice(0, index + 1), tokenPgRecords, { recenter: false });
         }
       }
     };
@@ -2089,26 +2145,56 @@
       icon.style.cssText = 'display:flex;align-items:center;justify-content:center;width:46px;position:relative;';
 
       const iconBadge = document.createElement('div');
-      iconBadge.style.cssText = [
-        // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
-        // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
-        // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
-        // (stesso border-radius) per restare pulita senza contenitore.
-        'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
-        'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
-        'display:flex', 'align-items:center', 'justify-content:center',
-        'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
-        'transform:scale(var(--token-icon-scale,1))',
-      ].join(';');
-      if (pg.censoUrl) {
+      // Token del Fato (PNG piazzati su chat_mappa_quest.asp): stesso stile
+      // esatto usato da lot per quei segnalini — cerchio colorato invece del
+      // quadrato stemma, anello 12010 dentro invece dell'immagine del PG
+      // (non ne hanno una vera). Il quadrato bordato resta per ogni PG.
+      if (pg.isFatoNpc) {
+        iconBadge.style.cssText = [
+          'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:50%', 'flex:0 0 auto',
+          `background:${pg.npcColor || '#555555'}`, 'border:2px solid #F8E9AA', 'box-shadow:0 0 6px rgba(248,233,170,0.5)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'transform:scale(var(--token-icon-scale,1))',
+        ].join(';');
         const img = document.createElement('img');
-        img.src = pg.censoUrl;
+        img.src = FATO_ICON_URL;
         img.alt = '';
         img.draggable = false;
-        img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
+        img.style.cssText = `width:${Math.floor(iconSize * 0.72)}px;height:${Math.floor(iconSize * 0.72)}px;object-fit:contain;`;
         iconBadge.appendChild(img);
       } else {
-        iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
+        iconBadge.style.cssText = [
+          // Niente overflow:hidden qui: clipperebbe anche il drop-shadow dello
+          // stemma (vedi STEMMA_FILTER), riducendolo a un bordo secco invece
+          // del glow sfumato che ha in lot. L'immagine si arrotonda da sé
+          // (stesso border-radius) per restare pulita senza contenitore.
+          'box-sizing:border-box', `width:${iconSize}px`, `height:${iconSize}px`, 'border-radius:4px', 'flex:0 0 auto',
+          'border:2px solid #F8E9AA', 'background:rgba(0,0,0,0.6)', 'box-shadow:0 0 6px rgba(248,233,170,0.4)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'font-family:Verdana,sans-serif', 'font-weight:bold', 'color:#F8E9AA',
+          'transform:scale(var(--token-icon-scale,1))',
+        ].join(';');
+        if (pg.censoUrl) {
+          const img = document.createElement('img');
+          img.src = pg.censoUrl;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
+          iconBadge.appendChild(img);
+        } else if (pg.iconUrl) {
+          // Parlante senza stemma reale (unsupportedType con icona razza
+          // nota, es. un drago in mutaforma) — stessa icona razza già usata
+          // da fillAvatar per l'avatar della card, qui più piccola dentro
+          // lo stesso badge quadrato, meglio di un'iniziale muta.
+          const img = document.createElement('img');
+          img.src = pg.iconUrl;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
+          iconBadge.appendChild(img);
+        } else {
+          iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
+        }
       }
 
       const iconLabel = document.createElement('div');
@@ -2116,13 +2202,49 @@
       iconLabel.style.cssText = [
         'position:absolute', 'top:100%', 'left:50%', 'margin-top:1px',
         'transform:translateX(-50%) scale(var(--icon-label-scale,1))', 'transform-origin:top center',
-        'font-family:Verdana,sans-serif', 'font-size:9px', 'color:#F8E9AA',
+        'font-family:Verdana,sans-serif', 'font-size:9px', `font-style:${pg.isFatoNpc ? 'italic' : 'normal'}`, 'color:#F8E9AA',
         'text-shadow:0 0 4px #000,0 0 8px #000', 'white-space:nowrap',
       ].join(';');
 
       icon.appendChild(iconBadge);
       icon.appendChild(iconLabel);
       return icon;
+    }
+
+    // Placeholder per un modellino intero senza aspetto ricostruibile:
+    // niente scheda dietro (unsupportedType, es. un drago in mutaforma) o
+    // niente PG affatto (un token piazzato dal Fato sulla mappa-quest, mai
+    // passato da una scheda). Invece di lasciare lo sprite vuoto (solo
+    // ombra + nome, corpo invisibile), una sagoma stilizzata e
+    // semitrasparente — coerente col fatto che "non è un vero corpo",
+    // pulsa piano (lotChatViewerGhostPulse, iniettata in cima allo script)
+    // per leggersi subito come presenza fantasma, non un bug di rendering.
+    // Sagoma originale (sudario stilizzato, disegnata a mano) — niente
+    // contorno netto: solo riempimento sfocato (filter:url(#...), vedi
+    // ghostFilterSvg iniettato in cima allo script) per un effetto etereo,
+    // "poco delineato", invece del bordo secco di un ritaglio.
+    const GHOST_PATH_D = 'M11.5,2 C15,2 17.5,5.5 17.5,10 C17.5,13 16,14.5 16,14.5 C18,20 19,28 18.5,35 '
+      + 'C17,33 15.5,37 14,34 C12.5,38 10.5,34 9,38 C7.5,34 6,33 4.5,35 '
+      + 'C4,28 5,20 7,14.5 C7,14.5 5.5,13 5.5,10 C5.5,5.5 8,2 11.5,2 Z';
+    function appendGhostPlaceholder(sprite) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 23 41');
+      svg.style.cssText = [
+        'position:absolute', 'inset:0', 'width:100%', 'height:100%',
+        // Glow dorato oltre alla solita ombra di profondità: col solo
+        // COLOR_GOLD traslucido sul riempimento si perdeva contro fondi
+        // chiari/mappa — questo alone resta leggibile a prescindere dallo
+        // sfondo sotto, il riempimento vero e proprio ora è quasi bianco.
+        'filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6)) drop-shadow(0 0 3px ' + COLOR_GOLD + ')',
+        'animation:lotChatViewerGhostPulse 2.6s ease-in-out infinite',
+      ].join(';');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', GHOST_PATH_D);
+      path.setAttribute('fill', COLOR_TEXT);
+      path.setAttribute('fill-opacity', '0.62');
+      path.style.filter = 'url(#lotChatViewerGhostBlur)';
+      svg.appendChild(path);
+      sprite.appendChild(svg);
     }
 
     // Modellino intero: layer sovrapposti (corpo, vestito, eventuali
@@ -2138,19 +2260,24 @@
       // parlando — sul token compatto è già dentro un riquadro bordato di
       // suo, il glow lì sarebbe ridondante (vedi la cella evidenziata).
       if (isActive) sprite.style.filter = `drop-shadow(0 0 5px ${pgAccentColor(pg.nome)})`;
-      ((pg.aspetto && pg.aspetto.layers) || []).forEach((url) => {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = '';
-        img.draggable = false;
-        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
-        // Alcuni layer (accessori tipo "manette") su lot puntano a
-        // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
-        // si vede nulla), ma senza questa gestione qui compare l'icona di
-        // immagine non trovata del browser sopra il modellino.
-        img.addEventListener('error', () => img.remove());
-        sprite.appendChild(img);
-      });
+      const layers = (pg.aspetto && pg.aspetto.layers) || [];
+      if (layers.length) {
+        layers.forEach((url) => {
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+          // Alcuni layer (accessori tipo "manette") su lot puntano a
+          // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
+          // si vede nulla), ma senza questa gestione qui compare l'icona di
+          // immagine non trovata del browser sopra il modellino.
+          img.addEventListener('error', () => img.remove());
+          sprite.appendChild(img);
+        });
+      } else {
+        appendGhostPlaceholder(sprite);
+      }
       const shadow = document.createElement('div');
       shadow.style.cssText = [
         'position:absolute', 'bottom:-2px', 'left:50%', 'transform:translateX(-50%)',
@@ -2191,6 +2318,16 @@
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
       const positions = lastKnownPositions(messages);
+      // Token del Fato: posizione iniettata direttamente (col/row già
+      // pronti dall'API di chat_mappa_quest.asp, nessun tag coordinata da
+      // interpretare), pg sintetico senza scheda — fillAvatar/buildFullSprite
+      // già sanno mostrare il fantasma quando pg.aspetto è assente.
+      fatoTokens.forEach((t) => { positions[t.nick] = { col: t.col, row: t.row }; });
+      const fatoPgRecords = fatoTokens.map((t) => ({
+        nome: t.nick, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+        aiOverlay: false, isFatoNpc: true, npcColor: t.colore || '#555555',
+      }));
+      const allPgRecords = pgRecords.concat(fatoPgRecords);
       const stackOrder = buildStackOrder(messages);
       const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
 
@@ -2212,7 +2349,7 @@
       refreshIdleCoord();
 
       const iconSize = Math.min(nativeCellW, nativeCellH) * 0.75;
-      const placed = pgRecords
+      const placed = allPgRecords
         .map((pg) => ({ pg, pos: positions[pg.nome] }))
         .filter(({ pos }) => pos && pos.col >= 0 && pos.col < mappa.cols && pos.row >= 0 && pos.row < mappa.rows);
 
@@ -2822,7 +2959,30 @@
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
-      updateTokens(messages, pgRecords);
+      // Parlanti non risolti (unsupportedType, es. un drago in mutaforma —
+      // niente link avatar nel markup, escluso apposta dal roster/fetch
+      // scheda, vedi il commento lì) ma con un'icona razza riconoscibile
+      // nel messaggio stesso: un fallback pg minimo, altrimenti la sua
+      // coordinata (che lastKnownPositions calcola comunque, coordRaw non
+      // dipende dal roster) non troverebbe mai un pg a cui agganciarsi in
+      // updateTokens e il token non comparirebbe affatto sulla mappa, pur
+      // avendo posizione e icona note. Deliberatamente escluso il caso
+      // senza razzaIcon (es. "Sistema" generico): più parlanti ignoti
+      // diversi condividerebbero quell'unica etichetta, un solo token
+      // "Sistema" finirebbe a saltare fra le loro coordinate diverse.
+      const unresolvedPgRecords = [];
+      const seenUnresolved = new Set();
+      messages.forEach((msg) => {
+        if (!msg.unsupportedType || !msg.razzaIcon) return;
+        if (seenUnresolved.has(msg.speaker) || pgRecords.some((p) => p.nome === msg.speaker)) return;
+        seenUnresolved.add(msg.speaker);
+        unresolvedPgRecords.push({
+          nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+          iconUrl: msg.razzaIcon, aiOverlay: false,
+        });
+      });
+      tokenPgRecords = pgRecords.concat(unresolvedPgRecords);
+      updateTokens(messages, tokenPgRecords);
 
       // Posizioni note "fino ad ora" nella timeline (stesso sottoinsieme
       // usato per la mappa): solo la card espansa mostra la coordinata,
@@ -2948,6 +3108,24 @@
     const liveNav = { index: -1 };
     let liveMappa = null;
     let liveDebounce = null;
+    // Token del Fato: sopravvivono al rebuild come liveMappa/liveNav (stesso
+    // motivo — passati per riferimento a ogni renderTimeline). Aggiornati
+    // solo ai tre momenti concordati (vedi refreshFatoTokens): mai un
+    // polling proprio, si appoggiano sempre al rebuild "pieno" già in uso
+    // per tutto il resto.
+    let liveFatoTokens = [];
+
+    // Richiamata: (1) subito dopo ogni resolveAndRenderLive (copre sia il
+    // primo render sia ogni nuovo messaggio, via il debounce sotto), (2)
+    // da setIndex quando si atterra sull'ultimo messaggio (click su una
+    // card, pillola "torna al live") — non un polling a intervallo, solo
+    // questi eventi. fetchMappaIcons() degrada da sé a [] se fallisce.
+    function refreshFatoTokens() {
+      fetchMappaIcons().then((tokens) => {
+        liveFatoTokens = tokens;
+        if (sceneVisible && rebuildScene) rebuildScene();
+      });
+    }
 
     function resolveAndRenderLive() {
       const parsed = parseChatTaverna(liveContainer);
@@ -2973,12 +3151,20 @@
           // versione ferma all'ultimo momento in cui era visibile, perdendo
           // tutti i messaggi arrivati nel frattempo. Si evita solo di
           // toccare il DOM adesso se non è comunque visibile.
-          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, { mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav });
+          rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, {
+            mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav,
+            fatoTokens: liveFatoTokens, onReachLive: refreshFatoTokens,
+          });
           if (sceneVisible) rebuildScene();
         })
         .catch((err) => {
           console.error('[lot-chat-viewer] errore nella risoluzione scena live:', err);
         });
+      // Ogni rebuild "pieno" (primo render, o un nuovo messaggio arrivato)
+      // è anche uno dei tre momenti concordati per rileggere i token del
+      // Fato — fuori dal .then sopra: non deve aspettare la risoluzione di
+      // pgRecords/mappa, sono fetch indipendenti.
+      refreshFatoTokens();
     }
 
     resolveAndRenderLive();
