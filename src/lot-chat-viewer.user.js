@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.1
+// @version      0.2.3
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -552,13 +552,26 @@
   // nodo di testo, nessuna evidenziazione. Confine di parola unicode-aware
   // (non \b, che tratta lettere accentate come non-word) cosi' un nome PG
   // dentro un'altra parola più lunga non scatta per errore.
-  function appendTextWithSelfMention(el, text, color) {
-    if (!myPgName || !text) {
+  //
+  // otherNames (facoltativo): altri nomi PG noti in questa sessione (il
+  // roster di renderTimeline) — evidenziati con lo stesso colore ma senza
+  // grassetto/sottolineatura, un richiamo più leggero delle citazioni
+  // altrui rispetto al proprio nome. Un solo passaggio regex su tutti i
+  // nomi insieme (non uno per nome) per non rompere lo split testo/match
+  // se due nomi si sovrappongono nello stesso punto.
+  function appendTextWithSelfMention(el, text, color, otherNames) {
+    const names = [];
+    if (myPgName) names.push(myPgName);
+    (otherNames || []).forEach((n) => { if (n && n !== myPgName && names.indexOf(n) === -1) names.push(n); });
+    if (!names.length || !text) {
       el.appendChild(document.createTextNode(text));
       return;
     }
-    const escaped = myPgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp('(^|[^\\p{L}\\p{N}_])(' + escaped + ')(?=$|[^\\p{L}\\p{N}_])', 'giu');
+    // Nomi più lunghi prima nell'alternanza: se uno è prefisso di un altro
+    // (es. "Aria"/"Ariadne"), vince il match più lungo.
+    names.sort((a, b) => b.length - a.length);
+    const alternation = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const re = new RegExp('(^|[^\\p{L}\\p{N}_])(' + alternation + ')(?=$|[^\\p{L}\\p{N}_])', 'giu');
     let last = 0;
     let found = false;
     let m;
@@ -567,9 +580,13 @@
       const start = m.index + m[1].length;
       const end = start + m[2].length;
       if (start > last) el.appendChild(document.createTextNode(text.slice(last, start)));
+      const matched = text.slice(start, end);
+      const isSelf = !!myPgName && matched.toLowerCase() === myPgName.toLowerCase();
       const mark = document.createElement('span');
-      mark.textContent = text.slice(start, end);
-      mark.style.cssText = `color:${color};font-weight:800;text-decoration:underline;text-underline-offset:2px;`;
+      mark.textContent = matched;
+      mark.style.cssText = isSelf
+        ? `color:${color};font-weight:800;text-decoration:underline;text-underline-offset:2px;`
+        : `color:${color};font-weight:400;`;
       el.appendChild(mark);
       last = end;
       re.lastIndex = end;
@@ -2699,6 +2716,10 @@
     function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed, squared) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
+      // Altri PG noti in questa sessione (roster di renderTimeline, in
+      // chiusura qui): passati a appendTextWithSelfMention per evidenziarli
+      // come "citazione altrui", più leggera della propria.
+      const otherPgNames = pgRecords.map((p) => p.nome).filter(Boolean);
       const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
@@ -2727,11 +2748,11 @@
               icon.style.cssText = 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;';
               bubble.appendChild(icon);
             } else {
-              appendTextWithSelfMention(bubble, run.value, COLOR_GOLD);
+              appendTextWithSelfMention(bubble, run.value, COLOR_GOLD, otherPgNames);
             }
           });
         } else {
-          appendTextWithSelfMention(bubble, text, COLOR_GOLD);
+          appendTextWithSelfMention(bubble, text, COLOR_GOLD, otherPgNames);
         }
         bubbles.appendChild(bubble);
         return bubbles;
@@ -2745,7 +2766,7 @@
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
-        appendTextWithSelfMention(bubble, p.content, COLOR_GOLD);
+        appendTextWithSelfMention(bubble, p.content, COLOR_GOLD, otherPgNames);
         slot.appendChild(bubble);
         bubbles.appendChild(slot);
         return slot;
