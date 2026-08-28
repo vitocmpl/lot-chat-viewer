@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.6
+// @version      0.2.7
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -293,20 +293,41 @@
 
   // --- Parser: Baule dei Ricordi (proc/schedapg/baule22.asp?ID=...) ---
   // Pagina configurabile liberamente dal giocatore stesso, fuori conoscenza
-  // in-game per dichiarazione esplicita nella pagina. Vi si può pubblicare un
-  // modellino intero custom (ritratto composito, assemblato/generato a mano
-  // dal giocatore) sotto una voce dedicata, riconosciuta dal testo esatto
-  // del <summary> ("model"): se presente, la prima <img> dentro lo stesso
-  // <details> ne è l'URL.
-  function parseBaule(html, baseUrl) {
+  // in-game per dichiarazione esplicita nella pagina. Per semplicità di
+  // gestione (curatela centralizzata invece che un baule per PG), i
+  // modellini custom si pubblicano tutti nel baule di Alderick, uno per
+  // voce: <summary>model</summary> per Alderick stesso, <summary>model-NOME</summary>
+  // (es. "model-vivia") per ogni altro PG. La prima <img> dentro lo stesso
+  // <details> ne è l'URL. Ritorna una mappa nome-PG (minuscolo) -> URL.
+  const BAULE_OWNER = 'Alderick';
+
+  function parseBauleModelli(html, baseUrl) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    const summaries = Array.from(doc.querySelectorAll('.baule-spoiler summary'));
-    const modelSummary = summaries.find((s) => s.textContent.trim().toLowerCase() === 'model');
-    const details = modelSummary ? modelSummary.closest('details') : null;
-    const img = details ? details.querySelector('img') : null;
-    return {
-      modelloUrl: img ? abs(img.getAttribute('src'), baseUrl) : null,
-    };
+    const modelli = {};
+    doc.querySelectorAll('.baule-spoiler').forEach((details) => {
+      const summary = details.querySelector('summary');
+      if (!summary) return;
+      const label = summary.textContent.trim().toLowerCase();
+      let key = null;
+      if (label === 'model') key = BAULE_OWNER.toLowerCase();
+      else if (label.startsWith('model-')) key = label.slice('model-'.length).trim();
+      if (!key) return;
+      const img = details.querySelector('img');
+      if (img) modelli[key] = abs(img.getAttribute('src'), baseUrl);
+    });
+    return modelli;
+  }
+
+  // Un solo fetch per l'intera sessione (non uno per PG): tutti i modellini
+  // custom vivono nella stessa pagina.
+  let bauleModelliPromise = null;
+  function fetchBauleModelli() {
+    if (!bauleModelliPromise) {
+      bauleModelliPromise = fetch(`https://www.extremelot.eu/proc/schedapg/baule22.asp?ID=${encodeURIComponent(BAULE_OWNER)}`, { credentials: 'same-origin' })
+        .then((res) => res.text().then((html) => parseBauleModelli(html, res.url)))
+        .catch(() => ({}));
+    }
+    return bauleModelliPromise;
   }
 
   // --- Parser: transcript della chat salvata (DOM di .lot-chat) -------
@@ -1260,9 +1281,8 @@
         .then((res) => res.text().then((html) => parseSchedaPG(html, res.url))),
       fetch(`https://www.extremelot.eu/proc/ARMInew26.asp?ID=${id}&scheda=`, { credentials: 'same-origin' })
         .then((res) => res.text().then((html) => parseAspetto(html, res.url))),
-      fetch(`https://www.extremelot.eu/proc/schedapg/baule22.asp?ID=${id}`, { credentials: 'same-origin' })
-        .then((res) => res.text().then((html) => parseBaule(html, res.url))),
-    ]).then(([scheda, aspetto, baule]) => ({ scheda, aspetto, baule }));
+      fetchBauleModelli(),
+    ]).then(([scheda, aspetto, modelli]) => ({ scheda, aspetto, modelloUrl: modelli[nome.toLowerCase()] || null }));
     pgFetchCache.set(nome, promise);
     return promise;
   }
@@ -1279,7 +1299,7 @@
       mente: fetched.scheda.mente,
       destrezza: fetched.scheda.destrezza,
       aspetto: fetched.aspetto,
-      modelloUrl: fetched.baule ? fetched.baule.modelloUrl : null,
+      modelloUrl: fetched.modelloUrl,
     };
   }
 
