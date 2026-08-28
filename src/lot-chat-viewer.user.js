@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.1.2
+// @version      0.1.3
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -33,6 +33,18 @@
     }
   `;
   document.head.appendChild(arrowStyle);
+
+  // Sfocatura del fantasma (vedi appendGhostPlaceholder): un filtro SVG non
+  // è esprimibile via style inline, serve un elemento <filter> vero in un
+  // <svg> nel DOM — iniettato una sola volta qui, invisibile di suo
+  // (width/height 0), referenziato altrove con filter:url(#id).
+  const ghostFilterSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  ghostFilterSvg.setAttribute('width', '0');
+  ghostFilterSvg.setAttribute('height', '0');
+  ghostFilterSvg.style.cssText = 'position:absolute;';
+  ghostFilterSvg.innerHTML = '<defs><filter id="lotChatViewerGhostBlur" x="-60%" y="-60%" width="220%" height="220%">'
+    + '<feGaussianBlur stdDeviation="1.1"/></filter></defs>';
+  document.body.appendChild(ghostFilterSvg);
 
   console.log('[lot-chat-viewer] script eseguito su', window.location.href,
     'top frame?', window.top === window);
@@ -2207,21 +2219,16 @@
     // semitrasparente — coerente col fatto che "non è un vero corpo",
     // pulsa piano (lotChatViewerGhostPulse, iniettata in cima allo script)
     // per leggersi subito come presenza fantasma, non un bug di rendering.
-    // Stessa sagoma per ogni caso, drago compreso: "Human outline generic"
-    // di Wikimedia Commons (CC0, nessuna attribuzione richiesta —
-    // https://commons.wikimedia.org/wiki/File:Human_outline_generic.svg),
-    // usata as-is invece di una sagoma disegnata a mano — pulita e
-    // leggibile anche piccola, cosa che un tracciato-foto (potrace di
-    // un'illustrazione dettagliata) non garantirebbe a 23x41px.
-    const GHOST_VIEWBOX = '0 0 325 720';
-    const GHOST_PATH_D = 'm176.04 3.1973c0.34179 5e-3 0.68303 0.0208 1.0254 0.0449v398.79c-1.9263 5.214-4.4988 14.255-5.877 21.445-1.0564 5.5117-2.6451 17.446-3.5312 26.521-1.7191 17.605-5.2968 42.812-6.3086 44.449-0.33645 0.54439-0.91548 12.253-1.2871 26.02-0.62462 23.139-0.90809 26.014-3.748 38.031-8.182 34.623-10.519 53.074-10.703 84.5-0.0821 14.025-0.2242 26.471-0.31641 27.656-0.0922 1.1855-1.7089 3.9983-3.5918 6.252-3.4278 4.1028-4.8913 7.5411-6 14.092-0.34137 2.017-2.7073 6.224-5.584 9.9297-2.7455 3.5367-4.9922 6.9987-4.9922 7.6934 0 0.69461-1.0003 1.9641-2.2227 2.8203-2.6378 1.8476-4.9898 1.926-13.459 0.45117-7.1155-1.2391-9.3951-3.2774-14.658-13.119l-2.8379-5.3106 7.6445-15.982c12.17-25.446 13.875-30.85 13.877-43.982 9.4e-4 -8.4348-0.62578-13.673-2.6875-22.459-4.7505-20.245-6.0449-33.174-6.1035-61.041-0.0521-24.767 0.033-25.874 2.9102-38.5 2.6954-11.828 2.9658-14.667 3-31.5 0.0334-16.444-0.21024-19.278-2.1934-25.5-1.2271-3.85-2.913-11.725-3.7461-17.5-2.0689-14.341-3.2046-17.895-7.0938-22.205-7.0139-7.7731-10.674-17.883-13.469-37.203-2.9795-20.595-5.5495-35.59-9.9531-58.092-4.5003-22.996-6.3027-36.238-5.5547-40.805 4.4794-27.348 6.0023-38.784 8.5508-64.195 4.9322-49.181 8.1397-63.385 16.568-73.402 3.3764-4.0126 6.9994-5.8988 16.551-8.6152 13.073-3.7179 29.402-14.485 38.127-25.139 5.8399-7.1313 5.2108-11.34-5.1152-34.172-9.6249-21.282-10.02-26.01-3.2969-39.578 7.2086-14.548 22.533-28.626 32.84-30.172 1.0917-0.16371 2.1641-0.24057 3.2363-0.22461zm-59.662 239.3-1.1992 3c-2.5001 6.2494-4.1072 14.404-5.5117 27.975-2.0456 19.765-3.8446 58.842-3.0508 66.266 0.36692 3.4317 1.065 6.4849 1.5508 6.7852 1.8833 1.1639 3.9253-11.269 6.9043-42.025 3.1448-32.469 3.9482-53.561 2.2461-59zm61.713-239.3c-0.34179 0.00509-0.68303 0.020803-1.0254 0.044922v398.79c1.9263 5.214 4.4988 14.255 5.877 21.445 1.0564 5.5117 2.6451 17.446 3.5312 26.521 1.7191 17.605 5.2968 42.812 6.3086 44.449 0.33645 0.54439 0.91548 12.253 1.2871 26.02 0.62462 23.139 0.90809 26.014 3.748 38.031 8.182 34.623 10.519 53.074 10.703 84.5 0.0821 14.025 0.2242 26.471 0.31641 27.656 0.0922 1.1855 1.7089 3.9983 3.5918 6.252 3.4278 4.1028 4.8913 7.5411 6 14.092 0.34137 2.017 2.7073 6.224 5.584 9.9297 2.7455 3.5367 4.9922 6.9987 4.9922 7.6934 0 0.69461 1.0003 1.9641 2.2227 2.8203 2.6378 1.8476 4.9898 1.926 13.459 0.45117 7.1155-1.2391 9.3951-3.2774 14.658-13.119l2.8379-5.3106-7.6445-15.982c-12.17-25.446-13.875-30.85-13.877-43.982-9.4e-4 -8.4348 0.62578-13.673 2.6875-22.459 4.7505-20.245 6.0449-33.174 6.1035-61.041 0.0521-24.767-0.033-25.874-2.9102-38.5-2.6954-11.828-2.9658-14.667-3-31.5-0.0334-16.444 0.21024-19.278 2.1934-25.5 1.2271-3.85 2.913-11.725 3.7461-17.5 2.0689-14.341 3.2046-17.895 7.0938-22.205 7.0139-7.7731 10.674-17.883 13.469-37.203 2.9795-20.595 5.5495-35.59 9.9531-58.092 4.5003-22.996 6.3027-36.238 5.5547-40.805-4.4794-27.348-6.0023-38.784-8.5508-64.195-4.9322-49.181-8.1397-63.385-16.568-73.402-3.3764-4.0126-6.9994-5.8988-16.551-8.6152-13.073-3.7179-29.402-14.485-38.127-25.139-5.8399-7.1313-5.2108-11.34 5.1152-34.172 9.6249-21.282 10.02-26.01 3.2969-39.578-7.2086-14.548-22.533-28.626-32.84-30.172-1.0917-0.16371-2.1641-0.24057-3.2363-0.22461zm59.662 239.3 1.1992 3c2.5001 6.2494 4.1072 14.404 5.5117 27.975 2.0456 19.765 3.8446 58.842 3.0508 66.266-0.36692 3.4317-1.065 6.4849-1.5508 6.7852-1.8833 1.1639-3.9253-11.269-6.9043-42.025-3.1448-32.469-3.9482-53.561-2.2461-59zm61.713-239.3c-0.34179 0.00509-0.68303 0.020803-1.0254 0.044922v398.79c1.9263 5.214 4.4988 14.255 5.877 21.445 1.0564 5.5117 2.6451 17.446 3.5312 26.521 1.7191 17.605 5.2968 42.812 6.3086 44.449 0.33645 0.54439 0.91548 12.253 1.2871 26.02 0.62462 23.139 0.90809 26.014 3.748 38.031 8.182 34.623 10.519 53.074 10.703 84.5 0.0821 14.025 0.2242 26.471 0.31641 27.656 0.0922 1.1855 1.7089 3.9983 3.5918 6.252 3.4278 4.1028 4.8913 7.5411 6 14.092 0.34137 2.017 2.7073 6.224 5.584 9.9297 2.7455 3.5367 4.9922 6.9987 4.9922 7.6934 0 0.69461 1.0003 1.9641 2.2227 2.8203 2.6378 1.8476 4.9898 1.926 13.459 0.45117 7.1155-1.2391 9.3951-3.2774 14.658-13.119l2.8379-5.3106-7.6445-15.982c-12.17-25.446-13.875-30.85-13.877-43.982-9.4e-4 -8.4348 0.62578-13.673 2.6875-22.459 4.7505-20.245 6.0449-33.174 6.1035-61.041 0.0521-24.767-0.033-25.874-2.9102-38.5-2.6954-11.828-2.9658-14.667-3-31.5-0.0334-16.444 0.21024-19.278 2.1934-25.5 1.2271-3.85 2.913-11.725 3.7461-17.5 2.0689-14.341 3.2046-17.895 7.0938-22.205 7.0139-7.7731 10.674-17.883 13.469-37.203 2.9795-20.595 5.5495-35.59 9.9531-58.092 4.5003-22.996 6.3027-36.238 5.5547-40.805-4.4794-27.348-6.0023-38.784-8.5508-64.195-4.9322-49.181-8.1397-63.385-16.568-73.402-3.3764-4.0126-6.9994-5.8988-16.551-8.6152-13.073-3.7179-29.402-14.485-38.127-25.139-5.8399-7.1313-5.2108-11.34 5.1152-34.172 9.6249-21.282 10.02-26.01 3.2969-39.578-7.2086-14.548-22.533-28.626-32.84-30.172-1.0917-0.16371-2.1641-0.24057-3.2363-0.22461zm59.662 239.3 1.1992 3c2.5001 6.2494 4.1072 14.404 5.5117 27.975 2.0456 19.765 3.8446 58.842 3.0508 66.266-0.36692 3.4317-1.065 6.4849-1.5508 6.7852-1.8833 1.1639-3.9253-11.269-6.9043-42.025-3.1448-32.469-3.9482-53.561-2.2461-59z';
+    // Sagoma originale (sudario stilizzato, disegnata a mano) — niente
+    // contorno netto: solo riempimento sfocato (filter:url(#...), vedi
+    // ghostFilterSvg iniettato in cima allo script) per un effetto etereo,
+    // "poco delineato", invece del bordo secco di un ritaglio.
+    const GHOST_PATH_D = 'M11.5,2 C15,2 17.5,5.5 17.5,10 C17.5,13 16,14.5 16,14.5 C18,20 19,28 18.5,35 '
+      + 'C17,33 15.5,37 14,34 C12.5,38 10.5,34 9,38 C7.5,34 6,33 4.5,35 '
+      + 'C4,28 5,20 7,14.5 C7,14.5 5.5,13 5.5,10 C5.5,5.5 8,2 11.5,2 Z';
     function appendGhostPlaceholder(sprite) {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', GHOST_VIEWBOX);
-      // preserveAspectRatio none: stessa proporzione "riempi il box" degli
-      // altri layer (object-fit:fill) invece del default che lettera-
-      // boxerebbe una sagoma con proporzioni diverse dal box 23x41.
-      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.setAttribute('viewBox', '0 0 23 41');
       svg.style.cssText = [
         'position:absolute', 'inset:0', 'width:100%', 'height:100%',
         'filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6))',
@@ -2230,10 +2237,8 @@
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', GHOST_PATH_D);
       path.setAttribute('fill', COLOR_GOLD);
-      path.setAttribute('fill-opacity', '0.3');
-      path.setAttribute('stroke', COLOR_GOLD);
-      path.setAttribute('stroke-width', '4');
-      path.setAttribute('stroke-opacity', '0.8');
+      path.setAttribute('fill-opacity', '0.4');
+      path.style.filter = 'url(#lotChatViewerGhostBlur)';
       svg.appendChild(path);
       sprite.appendChild(svg);
     }
