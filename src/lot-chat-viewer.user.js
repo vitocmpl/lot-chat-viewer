@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.3
+// @version      0.2.4
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -288,6 +288,24 @@
       descrizioneArmi: descArmi ? descArmi.textContent.replace(/\s+/g, ' ').trim() : null,
       indossati,
       conSe,
+    };
+  }
+
+  // --- Parser: Baule dei Ricordi (proc/schedapg/baule22.asp?ID=...) ---
+  // Pagina configurabile liberamente dal giocatore stesso, fuori conoscenza
+  // in-game per dichiarazione esplicita nella pagina. Vi si può pubblicare un
+  // modellino intero custom (ritratto composito, assemblato/generato a mano
+  // dal giocatore) sotto una voce dedicata, riconosciuta dal testo esatto
+  // del <summary> ("model"): se presente, la prima <img> dentro lo stesso
+  // <details> ne è l'URL.
+  function parseBaule(html, baseUrl) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const summaries = Array.from(doc.querySelectorAll('.baule-spoiler summary'));
+    const modelSummary = summaries.find((s) => s.textContent.trim().toLowerCase() === 'model');
+    const details = modelSummary ? modelSummary.closest('details') : null;
+    const img = details ? details.querySelector('img') : null;
+    return {
+      modelloUrl: img ? abs(img.getAttribute('src'), baseUrl) : null,
     };
   }
 
@@ -1242,7 +1260,9 @@
         .then((res) => res.text().then((html) => parseSchedaPG(html, res.url))),
       fetch(`https://www.extremelot.eu/proc/ARMInew26.asp?ID=${id}&scheda=`, { credentials: 'same-origin' })
         .then((res) => res.text().then((html) => parseAspetto(html, res.url))),
-    ]).then(([scheda, aspetto]) => ({ scheda, aspetto }));
+      fetch(`https://www.extremelot.eu/proc/schedapg/baule22.asp?ID=${id}`, { credentials: 'same-origin' })
+        .then((res) => res.text().then((html) => parseBaule(html, res.url))),
+    ]).then(([scheda, aspetto, baule]) => ({ scheda, aspetto, baule }));
     pgFetchCache.set(nome, promise);
     return promise;
   }
@@ -1259,6 +1279,7 @@
       mente: fetched.scheda.mente,
       destrezza: fetched.scheda.destrezza,
       aspetto: fetched.aspetto,
+      modelloUrl: fetched.baule ? fetched.baule.modelloUrl : null,
     };
   }
 
@@ -2317,23 +2338,61 @@
       // parlando — sul token compatto è già dentro un riquadro bordato di
       // suo, il glow lì sarebbe ridondante (vedi la cella evidenziata).
       if (isActive) sprite.style.filter = `drop-shadow(0 0 5px ${pgAccentColor(pg.nome)})`;
-      const layers = (pg.aspetto && pg.aspetto.layers) || [];
-      if (layers.length) {
-        layers.forEach((url) => {
-          const img = document.createElement('img');
-          img.src = url;
-          img.alt = '';
-          img.draggable = false;
-          img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
-          // Alcuni layer (accessori tipo "manette") su lot puntano a
-          // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
-          // si vede nulla), ma senza questa gestione qui compare l'icona di
-          // immagine non trovata del browser sopra il modellino.
-          img.addEventListener('error', () => img.remove());
-          sprite.appendChild(img);
+
+      function appendLayerStack() {
+        const layers = (pg.aspetto && pg.aspetto.layers) || [];
+        if (layers.length) {
+          layers.forEach((url) => {
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = '';
+            img.draggable = false;
+            img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));';
+            // Alcuni layer (accessori tipo "manette") su lot puntano a
+            // un'immagine 404 — su lot stesso è ininfluente (semplicemente non
+            // si vede nulla), ma senza questa gestione qui compare l'icona di
+            // immagine non trovata del browser sopra il modellino.
+            img.addEventListener('error', () => img.remove());
+            sprite.appendChild(img);
+          });
+        } else {
+          appendGhostPlaceholder(sprite);
+        }
+      }
+
+      if (pg.modelloUrl) {
+        // Modellino custom dal Baule dei Ricordi: immagine unica (non uno
+        // stack di layer da allineare pixel-per-pixel), quindi qui
+        // "contain" è corretto invece di "fill" — preserva le proporzioni
+        // naturali invece di stretchare. Accettata solo se il rapporto
+        // altezza/larghezza è vicino a quello del modellino standard
+        // (873x501, h/w 1.74, tolleranza ±30%): oltre quella soglia il
+        // fit-to-height risulterebbe troppo stretto/largo rispetto agli
+        // altri PG sulla mappa, meglio il fallback allo stack noto.
+        const img = document.createElement('img');
+        img.alt = '';
+        img.draggable = false;
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6));visibility:hidden;';
+        img.addEventListener('load', () => {
+          const ratio = img.naturalHeight / img.naturalWidth;
+          const ref = 873 / 501;
+          const tolerance = 0.3;
+          if (ratio >= ref * (1 - tolerance) && ratio <= ref * (1 + tolerance)) {
+            img.style.visibility = '';
+          } else {
+            console.warn(`[lot-chat-viewer] modello custom scartato per proporzioni incompatibili (${pg.nome}): h/w=${ratio.toFixed(2)}`);
+            img.remove();
+            appendLayerStack();
+          }
         });
+        img.addEventListener('error', () => {
+          img.remove();
+          appendLayerStack();
+        });
+        img.src = pg.modelloUrl;
+        sprite.appendChild(img);
       } else {
-        appendGhostPlaceholder(sprite);
+        appendLayerStack();
       }
       const shadow = document.createElement('div');
       shadow.style.cssText = [
