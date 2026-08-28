@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.0.99
+// @version      0.1.0
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -1459,6 +1459,12 @@
     // senza il riquadro mappa/griglia/token (vedi hasMap più sotto) — solo
     // testo/fumetti con la nostra grafica, come per il resto della chat.
     const hasMap = !!mappa.mapUrl;
+    // pgRecords "arricchito" con i fallback per parlanti non risolti ma con
+    // posizione+icona note (vedi draw() più sotto, unresolvedPgRecords) —
+    // ricalcolato ad ogni draw(), letto anche dal ricalcolo tokens on-zoom
+    // qui sotto, altrimenti quei token sparirebbero di nuovo al primo
+    // attraversamento della soglia compatto/modellino.
+    let tokenPgRecords = pgRecords;
     const existing = document.getElementById('lot-chat-viewer-scene');
     if (existing) existing.remove();
     if (!chatParsed.messages.length) {
@@ -1983,7 +1989,7 @@
       if (compact !== lastCompact) {
         lastCompact = compact;
         if (typeof updateTokens === 'function') {
-          updateTokens(chatParsed.messages.slice(0, index + 1), pgRecords, { recenter: false });
+          updateTokens(chatParsed.messages.slice(0, index + 1), tokenPgRecords, { recenter: false });
         }
       }
     };
@@ -2163,6 +2169,17 @@
           img.draggable = false;
           img.style.cssText = `width:100%;height:100%;object-fit:contain;border-radius:4px;filter:${STEMMA_FILTER};`;
           iconBadge.appendChild(img);
+        } else if (pg.iconUrl) {
+          // Parlante senza stemma reale (unsupportedType con icona razza
+          // nota, es. un drago in mutaforma) — stessa icona razza già usata
+          // da fillAvatar per l'avatar della card, qui più piccola dentro
+          // lo stesso badge quadrato, meglio di un'iniziale muta.
+          const img = document.createElement('img');
+          img.src = pg.iconUrl;
+          img.alt = '';
+          img.draggable = false;
+          img.style.cssText = 'width:70%;height:70%;object-fit:contain;';
+          iconBadge.appendChild(img);
         } else {
           iconBadge.textContent = pg.nome.charAt(0).toUpperCase();
         }
@@ -2186,11 +2203,23 @@
     // niente scheda dietro (unsupportedType, es. un drago in mutaforma) o
     // niente PG affatto (un token piazzato dal Fato sulla mappa-quest, mai
     // passato da una scheda). Invece di lasciare lo sprite vuoto (solo
-    // ombra + nome, corpo invisibile), una sagoma/sudario stilizzato e
+    // ombra + nome, corpo invisibile), una sagoma stilizzata e
     // semitrasparente — coerente col fatto che "non è un vero corpo",
     // pulsa piano (lotChatViewerGhostPulse, iniettata in cima allo script)
     // per leggersi subito come presenza fantasma, non un bug di rendering.
-    function appendGhostPlaceholder(sprite) {
+    // 'dragon' quando l'icona razza del messaggio è nota ed è quella dei
+    // draghi (vedi isDragon in draw()): una sagoma coerente col personaggio
+    // reale (testa a punta, corpo sinuoso, ali) invece del sudario generico.
+    const GHOST_PATHS = {
+      humanoid: 'M11.5,2 C15,2 17.5,5.5 17.5,10 C17.5,13 16,14.5 16,14.5 C18,20 19,28 18.5,35 '
+        + 'C17,33 15.5,37 14,34 C12.5,38 10.5,34 9,38 C7.5,34 6,33 4.5,35 '
+        + 'C4,28 5,20 7,14.5 C7,14.5 5.5,13 5.5,10 C5.5,5.5 8,2 11.5,2 Z',
+      dragon: 'M11.5,1.5 L15,7.5 L11.5,6 L8,7.5 Z '
+        + 'M8.5,7 C6,13 6,19 8.5,25 C6,29 6,33 8.5,38 C10.5,36.5 12.5,36.5 14.5,38 '
+        + 'C17,33 17,29 14.5,25 C17,19 17,13 14.5,7 C12.8,8.5 10.2,8.5 8.5,7 Z '
+        + 'M6,15 L0.5,11.5 L4.5,19 Z M17,15 L22.5,11.5 L18.5,19 Z',
+    };
+    function appendGhostPlaceholder(sprite, variant) {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 23 41');
       svg.style.cssText = [
@@ -2199,12 +2228,7 @@
         'animation:lotChatViewerGhostPulse 2.6s ease-in-out infinite',
       ].join(';');
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute(
-        'd',
-        'M11.5,2 C15,2 17.5,5.5 17.5,10 C17.5,13 16,14.5 16,14.5 C18,20 19,28 18.5,35 '
-        + 'C17,33 15.5,37 14,34 C12.5,38 10.5,34 9,38 C7.5,34 6,33 4.5,35 '
-        + 'C4,28 5,20 7,14.5 C7,14.5 5.5,13 5.5,10 C5.5,5.5 8,2 11.5,2 Z'
-      );
+      path.setAttribute('d', GHOST_PATHS[variant] || GHOST_PATHS.humanoid);
       path.setAttribute('fill', COLOR_GOLD);
       path.setAttribute('fill-opacity', '0.3');
       path.setAttribute('stroke', COLOR_GOLD);
@@ -2243,7 +2267,7 @@
           sprite.appendChild(img);
         });
       } else {
-        appendGhostPlaceholder(sprite);
+        appendGhostPlaceholder(sprite, pg.isDragon ? 'dragon' : 'humanoid');
       }
       const shadow = document.createElement('div');
       shadow.style.cssText = [
@@ -2926,7 +2950,31 @@
 
     function draw() {
       const messages = chatParsed.messages.slice(0, index + 1);
-      updateTokens(messages, pgRecords);
+      // Parlanti non risolti (unsupportedType, es. un drago in mutaforma —
+      // niente link avatar nel markup, escluso apposta dal roster/fetch
+      // scheda, vedi il commento lì) ma con un'icona razza riconoscibile
+      // nel messaggio stesso: un fallback pg minimo, altrimenti la sua
+      // coordinata (che lastKnownPositions calcola comunque, coordRaw non
+      // dipende dal roster) non troverebbe mai un pg a cui agganciarsi in
+      // updateTokens e il token non comparirebbe affatto sulla mappa, pur
+      // avendo posizione e icona note. Deliberatamente escluso il caso
+      // senza razzaIcon (es. "Sistema" generico): più parlanti ignoti
+      // diversi condividerebbero quell'unica etichetta, un solo token
+      // "Sistema" finirebbe a saltare fra le loro coordinate diverse.
+      const unresolvedPgRecords = [];
+      const seenUnresolved = new Set();
+      messages.forEach((msg) => {
+        if (!msg.unsupportedType || !msg.razzaIcon) return;
+        if (seenUnresolved.has(msg.speaker) || pgRecords.some((p) => p.nome === msg.speaker)) return;
+        seenUnresolved.add(msg.speaker);
+        unresolvedPgRecords.push({
+          nome: msg.speaker, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
+          iconUrl: msg.razzaIcon, aiOverlay: false,
+          isDragon: /\/razze\/draghi/i.test(msg.razzaIcon),
+        });
+      });
+      tokenPgRecords = pgRecords.concat(unresolvedPgRecords);
+      updateTokens(messages, tokenPgRecords);
 
       // Posizioni note "fino ad ora" nella timeline (stesso sottoinsieme
       // usato per la mappa): solo la card espansa mostra la coordinata,
