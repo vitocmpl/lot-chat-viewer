@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.1.3
+// @version      0.1.4
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -2231,13 +2231,17 @@
       svg.setAttribute('viewBox', '0 0 23 41');
       svg.style.cssText = [
         'position:absolute', 'inset:0', 'width:100%', 'height:100%',
-        'filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6))',
+        // Glow dorato oltre alla solita ombra di profondità: col solo
+        // COLOR_GOLD traslucido sul riempimento si perdeva contro fondi
+        // chiari/mappa — questo alone resta leggibile a prescindere dallo
+        // sfondo sotto, il riempimento vero e proprio ora è quasi bianco.
+        'filter:drop-shadow(0 3px 3px rgba(0,0,0,0.6)) drop-shadow(0 0 3px ' + COLOR_GOLD + ')',
         'animation:lotChatViewerGhostPulse 2.6s ease-in-out infinite',
       ].join(';');
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', GHOST_PATH_D);
-      path.setAttribute('fill', COLOR_GOLD);
-      path.setAttribute('fill-opacity', '0.4');
+      path.setAttribute('fill', COLOR_TEXT);
+      path.setAttribute('fill-opacity', '0.62');
       path.style.filter = 'url(#lotChatViewerGhostBlur)';
       svg.appendChild(path);
       sprite.appendChild(svg);
