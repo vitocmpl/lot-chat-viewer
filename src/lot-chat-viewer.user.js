@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.1.4
+// @version      0.2.3
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -189,7 +189,10 @@
     // prima immagine della pagina, dentro la cella con lo sfondo a
     // cornice — spesso ospitata su un dominio esterno (altervista, ecc.),
     // innocuo perché la usiamo solo come src di <img>, non con fetch().
-    const ritrattoImg = doc.querySelector('td[background*="cornice400"] img');
+    // Il nome del file cornice varia con le proporzioni del ritratto
+    // (200x400/200x300/200x200 osservati) — "cornice" senza suffisso,
+    // altrimenti i ritratti più piccoli di 200x400 restavano invisibili.
+    const ritrattoImg = doc.querySelector('td[background*="cornice"] img');
 
     return {
       nome: campi['Nome'] || null,
@@ -549,13 +552,26 @@
   // nodo di testo, nessuna evidenziazione. Confine di parola unicode-aware
   // (non \b, che tratta lettere accentate come non-word) cosi' un nome PG
   // dentro un'altra parola più lunga non scatta per errore.
-  function appendTextWithSelfMention(el, text, color) {
-    if (!myPgName || !text) {
+  //
+  // otherNames (facoltativo): altri nomi PG noti in questa sessione (il
+  // roster di renderTimeline) — evidenziati con lo stesso colore ma senza
+  // grassetto/sottolineatura, un richiamo più leggero delle citazioni
+  // altrui rispetto al proprio nome. Un solo passaggio regex su tutti i
+  // nomi insieme (non uno per nome) per non rompere lo split testo/match
+  // se due nomi si sovrappongono nello stesso punto.
+  function appendTextWithSelfMention(el, text, color, otherNames) {
+    const names = [];
+    if (myPgName) names.push(myPgName);
+    (otherNames || []).forEach((n) => { if (n && n !== myPgName && names.indexOf(n) === -1) names.push(n); });
+    if (!names.length || !text) {
       el.appendChild(document.createTextNode(text));
       return;
     }
-    const escaped = myPgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp('(^|[^\\p{L}\\p{N}_])(' + escaped + ')(?=$|[^\\p{L}\\p{N}_])', 'giu');
+    // Nomi più lunghi prima nell'alternanza: se uno è prefisso di un altro
+    // (es. "Aria"/"Ariadne"), vince il match più lungo.
+    names.sort((a, b) => b.length - a.length);
+    const alternation = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const re = new RegExp('(^|[^\\p{L}\\p{N}_])(' + alternation + ')(?=$|[^\\p{L}\\p{N}_])', 'giu');
     let last = 0;
     let found = false;
     let m;
@@ -564,9 +580,13 @@
       const start = m.index + m[1].length;
       const end = start + m[2].length;
       if (start > last) el.appendChild(document.createTextNode(text.slice(last, start)));
+      const matched = text.slice(start, end);
+      const isSelf = !!myPgName && matched.toLowerCase() === myPgName.toLowerCase();
       const mark = document.createElement('span');
-      mark.textContent = text.slice(start, end);
-      mark.style.cssText = `color:${color};font-weight:800;text-decoration:underline;text-underline-offset:2px;`;
+      mark.textContent = matched;
+      mark.style.cssText = isSelf
+        ? `color:${color};font-weight:800;text-decoration:underline;text-underline-offset:2px;`
+        : `color:${color};font-weight:400;`;
       el.appendChild(mark);
       last = end;
       re.lastIndex = end;
@@ -1304,16 +1324,26 @@
   // non può mai sapere). Nessuna dipendenza rigida: se la chiamata fallisce
   // (rete, sessione, luogo senza mappa-quest) si degrada a "nessun token
   // del Fato", non un errore bloccante.
+  // pgNicks (tipo 'PG' nella stessa risposta): non usato per la posizione
+  // (quella resta sempre e solo dalla chat), solo come segnale di presenza
+  // — un PG che disegniamo già (coordinata da chat) ma che non compare più
+  // qui è un segnale di uscita più affidabile della sola convenzione '//'.
+  // Deliberatamente NON usiamo 'users' (roster online del sito, molto più
+  // largo — nel payload reale osservato conteneva nick assenti da
+  // 'positions', quindi "online da qualche parte" non "presente qui").
   const MAPPA_ICONS_API_URL = 'https://www.extremelot.eu/proc/chat/api/chat_mappa_quest.asp?action=load';
   function fetchMappaIcons() {
     return fetch(MAPPA_ICONS_API_URL, { credentials: 'same-origin' })
       .then((res) => res.json())
       .then((data) => (data && data.success && Array.isArray(data.positions))
-        ? data.positions.filter((p) => p.tipo === 'PNG')
-        : [])
+        ? {
+          pngTokens: data.positions.filter((p) => p.tipo === 'PNG'),
+          pgNicks: data.positions.filter((p) => p.tipo === 'PG').map((p) => p.nick),
+        }
+        : { pngTokens: [], pgNicks: null })
       .catch((err) => {
-        console.warn('[lot-chat-viewer] token del Fato non disponibili:', err);
-        return [];
+        console.warn('[lot-chat-viewer] token/presenze del Fato non disponibili:', err);
+        return { pngTokens: [], pgNicks: null };
       });
   }
 
@@ -1358,6 +1388,16 @@
       }
     });
     return pos;
+  }
+
+  // Indice dell'ultimo messaggio di ciascun parlante — usato dal segnale di
+  // uscita via API (vedi updateTokens): confrontato con l'atIndex dello
+  // snapshot applicabile, per non far vincere un'assenza rilevata PRIMA
+  // dell'ultima battuta di un PG che nel frattempo è tornato a scrivere.
+  function lastMessageIndexBySpeaker(messages) {
+    const idx = {};
+    messages.forEach((m, i) => { if (m.speaker) idx[m.speaker] = i; });
+    return idx;
   }
 
   // Colore di identità per PG, derivato dall'hash del nome (nessuna scelta
@@ -1508,16 +1548,33 @@
       nav.index = index;
     }
     // Token del Fato (PNG piazzati su chat_mappa_quest.asp, mai passati da
-    // un messaggio in chat): letti solo in live, solo ai tre momenti in cui
-    // "si è sull'ultimo messaggio" (vedi opts.onReachLive più sotto e
+    // un messaggio in chat) e presenze PG (vedi fatoSnapshotForIndex più
+    // sotto): letti solo in live, solo ai tre momenti in cui "si è
+    // sull'ultimo messaggio" (vedi opts.onReachLive più sotto e
     // resolveAndRenderLive fuori da qui) — mai un polling proprio. In
     // replay quella pagina non esiste per quella sessione passata, niente
-    // da leggere: fatoTokens resta vuoto per design.
-    const fatoTokens = (mode === 'live' && opts.fatoTokens) || [];
+    // da leggere: fatoTokenHistory resta vuoto per design.
+    const fatoTokenHistory = (mode === 'live' && opts.fatoTokenHistory) || [];
+    // Uno snapshot per ogni fetch riuscito ({atIndex, pngTokens, pgNicks}),
+    // atIndex = indice dell'ultimo messaggio al momento del fetch. Per un
+    // dato indice si prende lo snapshot più recente con atIndex <= indice
+    // — così scorrendo indietro nella timeline si ricostruisce (con la
+    // granularità dei tre trigger, non un log continuo) come appariva il
+    // board del Fato in quel momento. Prima del primo fetch mai riuscito
+    // non c'è nessuno snapshot applicabile: niente token, di proposito
+    // (nessuna invenzione a ritroso di un dato mai osservato).
+    function fatoSnapshotForIndex(i) {
+      let best = null;
+      for (let k = 0; k < fatoTokenHistory.length; k++) {
+        const snap = fatoTokenHistory[k];
+        if (snap.atIndex <= i && (!best || snap.atIndex > best.atIndex)) best = snap;
+      }
+      return best;
+    }
     function setIndex(i) {
       index = i;
       if (nav) nav.index = index;
-      if (mode === 'live' && opts.onReachLive && index === chatParsed.messages.length - 1) opts.onReachLive();
+      if (mode === 'live' && opts.onReachLive && index === chatParsed.messages.length - 1) opts.onReachLive(index);
       draw();
     }
 
@@ -2318,6 +2375,8 @@
       const compact = view.zoom < ICON_ZOOM_THRESHOLD;
       tokenLayer.innerHTML = '';
       const positions = lastKnownPositions(messages);
+      const fatoSnap = fatoSnapshotForIndex(messages.length - 1);
+      const fatoTokens = fatoSnap ? fatoSnap.pngTokens : [];
       // Token del Fato: posizione iniettata direttamente (col/row già
       // pronti dall'API di chat_mappa_quest.asp, nessun tag coordinata da
       // interpretare), pg sintetico senza scheda — fillAvatar/buildFullSprite
@@ -2327,6 +2386,32 @@
         nome: t.nick, razza: null, sesso: null, censoUrl: null, ritrattoUrl: null, aspetto: null,
         aiOverlay: false, isFatoNpc: true, npcColor: t.colore || '#555555',
       }));
+      // Segnale di uscita via API, in aggiunta alla convenzione '//' (che
+      // resta invariata, applicata già dentro lastKnownPositions): un PG
+      // che stiamo disegnando da chat, assente dal roster pgNicks
+      // dell'ultimo snapshot APPLICABILE. "Applicabile" = non più vecchio
+      // dell'ultima battuta di quel PG (lastMsgIdx), altrimenti un
+      // ritorno recente in chat con coordinata fresca verrebbe nascosto
+      // da un'assenza rilevata PRIMA che tornasse. Stesso ritmo del '//':
+      // in dissolvenza finché è ancora l'ultimo messaggio in assoluto,
+      // rimosso del tutto al turno successivo (di chiunque).
+      if (fatoSnap && Array.isArray(fatoSnap.pgNicks)) {
+        const lastMsgIdx = lastMessageIndexBySpeaker(messages);
+        const finalIndex = messages.length - 1;
+        Object.keys(positions).forEach((speaker) => {
+          if (positions[speaker].exiting) return; // già gestito dal '//'
+          if (fatoTokens.some((t) => t.nick === speaker)) return; // è un token PNG, non un PG
+          // Parlanti fuori roster (Drago/Sistema, vedi unresolvedPgRecords
+          // in draw()): etichette condivise/inventate, mai un vero nick
+          // tracciato da lot — non hanno senso da cercare in pgNicks.
+          if (!pgRecords.some((p) => p.nome === speaker)) return;
+          if (fatoSnap.pgNicks.includes(speaker)) return;
+          const msgIdx = lastMsgIdx[speaker];
+          if (msgIdx === undefined || fatoSnap.atIndex < msgIdx) return; // assenza rilevata prima del suo ritorno: ignorata
+          if (fatoSnap.atIndex === finalIndex) positions[speaker].exiting = true;
+          else delete positions[speaker];
+        });
+      }
       const allPgRecords = pgRecords.concat(fatoPgRecords);
       const stackOrder = buildStackOrder(messages);
       const activeSpeaker = messages.length ? messages[messages.length - 1].speaker : null;
@@ -2631,6 +2716,10 @@
     function buildSpeechBubbles(text, invert, borderColor, borderBold, singleBlock, richRuns, dashed, squared) {
       const bubbles = document.createElement('div');
       const border = borderColor || COLOR_LINE;
+      // Altri PG noti in questa sessione (roster di renderTimeline, in
+      // chiusura qui): passati a appendTextWithSelfMention per evidenziarli
+      // come "citazione altrui", più leggera della propria.
+      const otherPgNames = pgRecords.map((p) => p.nome).filter(Boolean);
       const borderWidth = borderBold ? '3px' : '1.5px';
       if (singleBlock) {
         const bubble = document.createElement('div');
@@ -2659,11 +2748,11 @@
               icon.style.cssText = 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;';
               bubble.appendChild(icon);
             } else {
-              appendTextWithSelfMention(bubble, run.value, COLOR_GOLD);
+              appendTextWithSelfMention(bubble, run.value, COLOR_GOLD, otherPgNames);
             }
           });
         } else {
-          appendTextWithSelfMention(bubble, text, COLOR_GOLD);
+          appendTextWithSelfMention(bubble, text, COLOR_GOLD, otherPgNames);
         }
         bubbles.appendChild(bubble);
         return bubbles;
@@ -2677,7 +2766,7 @@
           'padding:7px 11px', 'font-size:12.5px', 'line-height:1.5', 'user-select:text',
           p.type === 'speech' ? 'border-radius:14px;' : 'border-radius:3px;font-style:italic;',
         ].join(';');
-        appendTextWithSelfMention(bubble, p.content, COLOR_GOLD);
+        appendTextWithSelfMention(bubble, p.content, COLOR_GOLD, otherPgNames);
         slot.appendChild(bubble);
         bubbles.appendChild(slot);
         return slot;
@@ -3108,21 +3197,26 @@
     const liveNav = { index: -1 };
     let liveMappa = null;
     let liveDebounce = null;
-    // Token del Fato: sopravvivono al rebuild come liveMappa/liveNav (stesso
-    // motivo — passati per riferimento a ogni renderTimeline). Aggiornati
-    // solo ai tre momenti concordati (vedi refreshFatoTokens): mai un
-    // polling proprio, si appoggiano sempre al rebuild "pieno" già in uso
-    // per tutto il resto.
-    let liveFatoTokens = [];
+    // Storico dei fetch riusciti, uno per ogni trigger (vedi
+    // fatoSnapshotForIndex dentro renderTimeline): sopravvive al rebuild
+    // come liveMappa/liveNav (stesso motivo — passato per riferimento ad
+    // ogni renderTimeline), così scorrendo indietro nella timeline si
+    // ricostruisce lo stato del board del Fato/presenze PG come appariva
+    // in quel momento, con la granularità dei tre trigger. Mai un polling
+    // proprio: un fetch fallito non viene registrato (si resta sull'ultimo
+    // snapshot buono, invece di un buco temporaneo per un blip di rete).
+    const fatoTokenHistory = [];
 
     // Richiamata: (1) subito dopo ogni resolveAndRenderLive (copre sia il
     // primo render sia ogni nuovo messaggio, via il debounce sotto), (2)
     // da setIndex quando si atterra sull'ultimo messaggio (click su una
     // card, pillola "torna al live") — non un polling a intervallo, solo
-    // questi eventi. fetchMappaIcons() degrada da sé a [] se fallisce.
-    function refreshFatoTokens() {
-      fetchMappaIcons().then((tokens) => {
-        liveFatoTokens = tokens;
+    // questi eventi. atIndex = indice dell'ultimo messaggio in quel
+    // momento, passato da chi chiama (vedi entrambi i call site sotto).
+    function refreshFatoTokens(atIndex) {
+      fetchMappaIcons().then(({ pngTokens, pgNicks }) => {
+        if (pgNicks === null) return; // fetch fallito, niente da registrare
+        fatoTokenHistory.push({ atIndex, pngTokens, pgNicks });
         if (sceneVisible && rebuildScene) rebuildScene();
       });
     }
@@ -3153,7 +3247,7 @@
           // toccare il DOM adesso se non è comunque visibile.
           rebuildScene = () => renderTimeline(parsed, pgRecords, mappa, {
             mode: 'live', view: liveView, mapVisible: liveMapVisible, nav: liveNav,
-            fatoTokens: liveFatoTokens, onReachLive: refreshFatoTokens,
+            fatoTokenHistory, onReachLive: (i) => refreshFatoTokens(i),
           });
           if (sceneVisible) rebuildScene();
         })
@@ -3164,7 +3258,7 @@
       // è anche uno dei tre momenti concordati per rileggere i token del
       // Fato — fuori dal .then sopra: non deve aspettare la risoluzione di
       // pgRecords/mappa, sono fetch indipendenti.
-      refreshFatoTokens();
+      refreshFatoTokens(parsed.messages.length - 1);
     }
 
     resolveAndRenderLive();
