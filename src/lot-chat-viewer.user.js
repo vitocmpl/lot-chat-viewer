@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.7
+// @version      0.2.8
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -297,8 +297,10 @@
   // gestione (curatela centralizzata invece che un baule per PG), i
   // modellini custom si pubblicano tutti nel baule di Alderick, uno per
   // voce: <summary>model</summary> per Alderick stesso, <summary>model-NOME</summary>
-  // (es. "model-vivia") per ogni altro PG. La prima <img> dentro lo stesso
-  // <details> ne è l'URL. Ritorna una mappa nome-PG (minuscolo) -> URL.
+  // (es. "model-vivia") per ogni altro PG. Il testo dentro lo stesso
+  // <details> (non più un'immagine: troppe img nel baule mandavano in
+  // affanno l'editor) è l'URL grezzo. Ritorna una mappa nome-PG
+  // (minuscolo) -> URL.
   const BAULE_OWNER = 'Alderick';
 
   function parseBauleModelli(html, baseUrl) {
@@ -312,8 +314,9 @@
       if (label === 'model') key = BAULE_OWNER.toLowerCase();
       else if (label.startsWith('model-')) key = label.slice('model-'.length).trim();
       if (!key) return;
-      const img = details.querySelector('img');
-      if (img) modelli[key] = abs(img.getAttribute('src'), baseUrl);
+      const text = details.textContent.replace(summary.textContent, '').trim();
+      const match = text.match(/https?:\/\/\S+/);
+      if (match) modelli[key] = abs(match[0], baseUrl);
     });
     return modelli;
   }
