@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         lot-chat-viewer
 // @namespace    https://github.com/vitocmpl/lot-chat-viewer
-// @version      0.2.0
+// @version      0.2.1
 // @description  Visualizzatore non ufficiale (sola lettura) della chat di Extremelot come scena/mappa con modellini
 // @match        https://www.extremelot.eu/proc/chat/chat_salvate03.asp*
 // @match        https://www.extremelot.eu/proc/chat/chat_taverne*.asp*
@@ -189,7 +189,10 @@
     // prima immagine della pagina, dentro la cella con lo sfondo a
     // cornice — spesso ospitata su un dominio esterno (altervista, ecc.),
     // innocuo perché la usiamo solo come src di <img>, non con fetch().
-    const ritrattoImg = doc.querySelector('td[background*="cornice400"] img');
+    // Il nome del file cornice varia con le proporzioni del ritratto
+    // (200x400/200x300/200x200 osservati) — "cornice" senza suffisso,
+    // altrimenti i ritratti più piccoli di 200x400 restavano invisibili.
+    const ritrattoImg = doc.querySelector('td[background*="cornice"] img');
 
     return {
       nome: campi['Nome'] || null,
