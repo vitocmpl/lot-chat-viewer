@@ -2,6 +2,20 @@
 
 Visualizzatore non ufficiale, fan-made, per [Extremelot](https://www.extremelot.eu) — trasforma la chat testuale del gioco in una scena spaziale (mappa + modellini dei personaggi), sia per seguire una chat in corso sia per rileggere chat già giocate.
 
+## Screenshot
+
+**Solo chat** — la timeline dei messaggi senza mappa. Si ottiene col pulsante "Nascondi mappa", ed è anche la modalità automatica nei luoghi che non hanno una mappa:
+
+![Solo chat](docs/screenshot/chat-only.png)
+
+**Chat e mappa** — la scena completa, mappa non zoomata con gli stemmi compatti dei personaggi:
+
+![Chat e mappa](docs/screenshot/chat-map.png)
+
+**Chat e mappa zoomata** — zoom alto sulla mappa, con i modellini interi dei personaggi:
+
+![Chat e mappa zoomata](docs/screenshot/chat-map-zoomed.png)
+
 ## Cos'è e cosa NON è
 
 - **Non ufficiale.** Nessuna affiliazione con Extremelot o con la sua proprietà. Se la proprietà fosse interessata a integrare qualcosa di simile nativamente nel gioco, il codice è qui, MIT, libero di essere riusato o preso a riferimento — contattatemi pure.
